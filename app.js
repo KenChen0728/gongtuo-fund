@@ -1,7 +1,7 @@
 import { createFirebaseStore, createDemoStore } from './data.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.17.3';
+const VERSION = '2026.11.17.4';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -151,7 +151,7 @@ const fail = msg => e => { console.error(e); toast(e && e.code === 'offline' ? '
 let netState = { pending: 0 };
 function renderNet() {
   const b = $('#netBar'); let t = '';
-  if (netState.readError) t = netState.readError.includes('resource-exhausted') ? '今天的使用量已滿，明天會恢復。這不代表沒有資料，請明天再開，並告訴 Ken。' : netState.readError.includes('permission') ? '資料讀取失敗，這個序號可能沒有使用權限，請通知 Ken。' : '現在讀不到資料，可能是網路不穩。這不代表沒有資料，請晚點再開。';
+  if (netState.readError) t = netState.readError.includes('resource-exhausted') ? '今天的使用量已滿，明天會恢復。這不代表沒有資料，請明天再開，並告訴管理者。' : netState.readError.includes('permission') ? '資料讀取失敗，這個序號可能沒有使用權限，請通知管理者。' : '現在讀不到資料，可能是網路不穩。這不代表沒有資料，請晚點再開。';
   else if (!navigator.onLine) t = netState.pending ? '現在沒有網路，剛才的動作還沒存好。連上網路後會自動補存，在那之前請不要關掉 App。' : '現在沒有網路，畫面可能不是最新的。';
   else if (netState.writeError) t = '有一筆資料沒有存成功，請重新整理後確認。';
   b.textContent = t; b.hidden = !t;
@@ -170,13 +170,13 @@ const DEMO_ONLY = location.protocol === 'file:';
 async function startStore(demo) {
   DEMO = demo;
   try { store = demo ? createDemoStore(() => sampleData({ CY, CM })) : await createFirebaseStore({ year: CY, ym: CYM }); }
-  catch (e) { console.error(e); $('#bootMsg').textContent = '無法連線到資料庫，請確認網路後重新開啟。如果一直這樣，請告訴 Ken。'; return; }
+  catch (e) { console.error(e); $('#bootMsg').textContent = '無法連線到資料庫，請確認網路後重新開啟。如果一直這樣，請告訴管理者。'; return; }
   store.onStatus(s => { Object.assign(netState, s); renderNet(); });
   store.onData(() => onData());
   store.onAuth(info => {
     $('#boot').hidden = true;
     if (!info) { showLogin(); return; }
-    if (info.error) { showLogin(info.error === 'nomember' ? '這個序號還沒有設定是哪一間公托，請通知 Ken。' : '登入後讀取資料失敗，請確認網路後再試一次。'); return; }
+    if (info.error) { showLogin(info.error === 'nomember' ? '這個序號還沒有設定是哪一間公托，請通知管理者。' : '登入後讀取資料失敗，請確認網路後再試一次。'); return; }
     NID = info.nid; firstData = true; ADMIN = !!info.admin;
     $('#login').hidden = true; $('#app').hidden = false;
     $('#demoBar').hidden = !DEMO;
@@ -500,11 +500,11 @@ function set() {
    <div class="actions start"><button type="button" class="btn" id="demoAlert">再看一次提醒</button></div>
   </details>
   <details class="card pickbox"><summary>備份</summary>
-   <p class="hint" style="font-size:15px">資料存在雲端，換手機或電腦都還在。建議每個月下載一份備份存到電腦，萬一有問題可以交給 Ken 還原。</p>
+   <p class="hint" style="font-size:15px">資料存在雲端，換手機或電腦都還在。建議每個月下載一份備份存到電腦，萬一有問題可以交給管理者還原。</p>
    <div class="actions start"><button type="button" class="btn" id="backup">下載備份</button></div>
   </details>
   <div class="actions start"><button type="button" class="btn logout" id="logout" style="background:var(--bad);border-color:var(--bad);color:#fff;font-weight:700">${DEMO ? '離開範例資料' : '登出這台裝置'}</button></div>
-  <p class="ver">版本 ${VERSION}・遇到問題時，把畫面截圖傳給 Ken，並告訴他這個版本號。</p>`;
+  <p class="ver">版本 ${VERSION}・遇到問題時，把畫面截圖傳給管理者，並告知這個版本號。</p>`;
 }
 function help() {
   const steps = [

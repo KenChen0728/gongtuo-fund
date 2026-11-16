@@ -6,7 +6,7 @@
 - 範例資料（不會存檔）：https://kenchen0728.github.io/gongtuo-fund/?demo
 
 ## 登入
-每間公托一組序號，序號由 Ken 管理，**不要放進這個公開的 repository**。
+每間公托一組序號，序號由管理者保管，**不要放進這個公開的 repository**。
 序號去掉「-」、轉小寫後，就是 Firebase 帳號 `<序號>@gongtuo-fund.firebaseapp.com` 的帳號和密碼。
 
 ## 換序號
