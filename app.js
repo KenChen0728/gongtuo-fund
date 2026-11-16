@@ -1,7 +1,7 @@
 import { createFirebaseStore, createDemoStore } from './data.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.17.1';
+const VERSION = '2026.11.17.2';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -210,7 +210,7 @@ $('#fLogin').addEventListener('submit', async e => {
   try { await store.login($('#serial').value); }
   catch (x) {
     const c = x.code || '';
-    err.textContent = c === 'format' ? '序號是 8 個英文字母或數字，例如 7K3P-92QX，請再確認一次。'
+    err.textContent = c === 'format' ? '序號是英文字母和數字，例如 7K3P-92QX，請再確認一次。'
       : c.includes('too-many') ? '嘗試太多次，請過幾分鐘再試。'
       : c.includes('network') ? '現在沒有網路，請連上網路後再登入。'
       : '序號不正確，請再確認一次。';

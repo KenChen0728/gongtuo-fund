@@ -13,7 +13,7 @@ const EMAIL_DOMAIN = '@gongtuo-fund.firebaseapp.com';
 // 序號 → 帳號：去掉「-」和空白、轉小寫；帳號＝序號@網域，密碼＝序號
 export function serialToCred(serial) {
   const s = String(serial || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-  if (s.length !== 8) return null;
+  if (s.length < 6 || s.length > 20) return null;   // 各園 8 碼；管理者可以用較長的
   const l = s.toLowerCase();
   return { email: l + EMAIL_DOMAIN, password: l };
 }
