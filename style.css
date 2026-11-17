@@ -335,3 +335,8 @@ input[type=date]{font:16px var(--font);padding:8px;border:1px solid var(--line);
 .rdate label{flex-direction:row;font-weight:700;font-size:16px}
 .rdate input{width:auto;min-height:44px}
 .rdate .meta{flex-basis:100%;font-size:14px}
+.p-cus{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1px var(--muted)}
+.ancus{margin-top:12px}
+.ancus th:first-child{text-align:left;white-space:nowrap}
+.fpdate{flex-direction:row;align-items:center;gap:8px;font-weight:700}
+.fpdate input{width:auto;min-height:44px}
