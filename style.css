@@ -304,3 +304,30 @@ input[type=date]{font:16px var(--font);padding:8px;border:1px solid var(--line);
 .helpshot{width:min(240px,100%);height:auto;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
 .helpsteps{flex:1 1 260px;margin:0;padding-left:22px;display:flex;flex-direction:column;gap:8px;font-size:16px}
 .two{align-items:end}
+
+/* 年度經費報表 */
+.a4view.land .a4box{width:calc(1123px*var(--s));height:calc(794px*var(--s))}
+.a4.land{width:1123px;height:794px;padding:28px 30px}
+@media print{.printarea .a4.land{width:297mm;height:210mm;padding:8mm 8mm}}
+.antable{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums;color:#000}
+.antable th,.antable td{border:1px solid #9a9a9a;padding:3px 5px;text-align:center;white-space:nowrap;font-weight:400;color:#000}
+.antable td.m{text-align:right}
+.antable td.man{font-style:normal}
+.antable .anside{min-width:44px}
+.antable .admlab{white-space:normal}
+.antable tr.an-h>th{background:#FAEDA0}.antable tr.an-lav>*{background:#E5DFEC}.antable tr.an-yel>*{background:#FFFFCC}.antable tr.an-blue>*{background:#DAEEF3}.antable tr.an-green>*{background:#EAF1DD}.antable tr.an-gray>*{background:#F2F2F2}.antable tr>.an-lavc{background:#E5DFEC}
+.antable th,.antable td{font-size:inherit}
+.antable tr>th.admlab{font-weight:700;color:#003399}
+.antable .neg,.anbox .neg{color:#c00;font-weight:400}
+.anbox{border-collapse:collapse;margin-top:10px;font-size:13px;color:#000;background:#fff}
+.anbox th,.anbox td{border:1px solid #9a9a9a;padding:3px 10px;text-align:left;font-weight:400;color:#000}
+.anwrap{background:#fff;padding:0}
+.anwrap .antable{min-width:1200px}
+.anwrap .anbox{margin:10px}
+.anprint .antitle{text-align:center;font-size:15px;line-height:1.5;margin-bottom:6px}
+.anprint .antable{font-size:11.5px}
+.anprint .antable th,.anprint .antable td{padding:2px 3px;border-color:#000;font-weight:400}
+.anprint .anbox{font-size:12px}.anprint .anbox th,.anprint .anbox td{border-color:#000}
+.annote{font-size:11px;margin:6px 0 0}
+.imptable{font-size:12px}.imptable td,.imptable th{padding:4px 6px;white-space:nowrap}
+@media print{.printarea *{-webkit-print-color-adjust:exact;print-color-adjust:exact}}

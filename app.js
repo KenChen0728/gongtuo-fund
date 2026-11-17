@@ -1,7 +1,8 @@
 import { createFirebaseStore, createDemoStore } from './data.js';
+import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.17.7';
+const VERSION = '2026.11.17.8';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -38,7 +39,7 @@ const SETTINGS_REV = 2;
 // 01 號的項目：萬丹、育英、壽天是計畫督導津貼，公正是計畫主持費
 const catsWithFirst = first => first === '計畫督導津貼' ? DEFAULT_CATS : DEFAULT_CATS.map((g, i) => i ? g : { ...g, items: g.items.map(x => x === '計畫督導津貼' ? first : x) });
 NURSERIES.gongzheng.cats = catsWithFirst('計畫主持費');
-const DEFAULTS = { rev: SETTINGS_REV, firstItem: '計畫督導津貼', director: '', reserved: 9, petty: 30000, supervisor: 5000, staff: [], wbPersonBudget: 0, wbPersonUsedBefore: 0, wbBizTotal: 0, budget: {}, usedBefore: {}, cats: DEFAULT_CATS, receiptNext: 1, receiptSkip: [], vendors: {} };
+const DEFAULTS = { rev: SETTINGS_REV, firstItem: '計畫督導津貼', admBudget: 0, manualUntil: {}, director: '', reserved: 9, petty: 30000, supervisor: 5000, staff: [], wbPersonBudget: 0, wbPersonUsedBefore: 0, wbBizTotal: 0, budget: {}, usedBefore: {}, cats: DEFAULT_CATS, receiptNext: 1, receiptSkip: [], vendors: {} };
 const SRC_CLS = { '委辦費-業務費': 'wb', '委辦費-人事費': 'wb', '委辦費-行管費': 'adm', '營運收入支應-業務費': 'op', '營運收入支應-人事費': 'op', '營運收入支應-年終獎金': 'op', '營運收入支應-餐點費': 'food', '營運收入支應-兒童團體保險': 'ins', '提升托育品質-業務費': 'q', '提升托育品質-人事費': 'q' };
 const COMMON = ['幼兒食材', '教學活動及節慶活動用品', '日常消耗用品', '行政文書辦公', '員工福利', '玩具書籍'];
 const INCOME_SRC = ['優化比', '提升托育品質', '縣府補助款', '其他'];
@@ -118,26 +119,67 @@ function payrollRows(y, m) {
   return (N.staff || []).map(name => { const p = pd.find(r => r.name === name); return { name, src: p ? p.src : '委辦費-人事費', amount: p ? p.amount : '' }; });
 }
 const yearMonths = () => Object.values(S().months).filter(d => d.y === CY);
-function wbPersonUsed() {
-  let u = +N.wbPersonUsedBefore || 0;
-  for (const d of yearMonths()) for (const r of d.payroll || []) if (r.src === '委辦費-人事費') u += +r.amount || 0;
-  for (const v of vouchers()) if (v.y === CY && v.kind === 'hr' && v.src === '委辦費-人事費') u += v.amount;
-  return u;
-}
-function wbUsed(cat) {
-  let u = +(N.usedBefore || {})[cat] || 0;
-  for (const v of vouchers()) if (v.y === CY && v.src === '委辦費-業務費' && v.cat === cat) u += v.amount;
-  if (cat === N.firstItem) for (const d of yearMonths()) if (d.payroll) u += +(d.supervisor ?? N.supervisor) || 0;
-  return u;
-}
-const wbBizUsed = () => wbItems().reduce((a, k) => a + wbUsed(k), 0);
-function monthExpense(y, m) {
+/* ===== 年度經費報表（照萬丹 115 年「每月報表」的列別） =====
+   補登月份（系統啟用前，從 Excel 匯入）用 months.manual；其他月份由系統資料算 */
+const manualUntil = y => +((N.manualUntil || {})[y]) || 0;
+const AN_INC = [['fee', '月費收入'], ['opt', '優化比'], ['q', '提升托育品質']];
+const AN_GROUPS = [
+  { g: '營運收入\n支應', key: 'op', rows: [['opHR', '人事'], ['opBiz', '業務'], ['opBonus', '年終'], ['opMeal', '餐點'], ['opIns', '兒童團體保險']] },
+  { g: '提升托育\n品質', key: 'qq', rows: [['qHR', '人事'], ['qBiz', '業務']] },
+];
+const AN_WB = [['wbHR', '人事'], ['wbBiz', '業務']];
+const SRC_KEY = { '營運收入支應-人事費': 'opHR', '營運收入支應-業務費': 'opBiz', '營運收入支應-年終獎金': 'opBonus', '營運收入支應-餐點費': 'opMeal', '營運收入支應-兒童團體保險': 'opIns', '提升托育品質-人事費': 'qHR', '提升托育品質-業務費': 'qBiz', '委辦費-人事費': 'wbHR', '委辦費-業務費': 'wbBiz', '委辦費-行管費': 'adm' };
+const emptyMonth = () => ({ fee: 0, opt: 0, q: 0, other: 0, sub: {}, opHR: 0, opBiz: 0, opBonus: 0, opMeal: 0, opIns: 0, qHR: 0, qBiz: 0, wbHR: 0, wbBiz: 0, adm: 0 });
+function sysMonth(y, m) {
+  const r = emptyMonth(); r.fee = feeTotal(y, m);
+  for (const x of S().incomes) if (x.y === y && x.m === m) {
+    const a = +x.amount || 0;
+    if (x.source === '優化比') r.opt += a; else if (x.source === '提升托育品質') r.q += a;
+    else if (x.source === '縣府補助款') { const l = x.label || '縣府補助款'; r.sub[l] = (r.sub[l] || 0) + a } else r.other += a;
+  }
   const d = monthDoc(y, m);
-  let e = vouchersOf(y, m).reduce((a, v) => a + v.amount, 0);
-  if (d.payroll) e += d.payroll.reduce((a, r) => a + (+r.amount || 0), 0) + (+(d.supervisor ?? N.supervisor) || 0);
-  return e;
+  for (const p of d.payroll || []) r[p.src === '委辦費-人事費' ? 'wbHR' : 'opHR'] += +p.amount || 0;
+  if (d.payroll) r.wbBiz += +(d.supervisor ?? N.supervisor) || 0;
+  for (const v of vouchersOf(y, m)) r[SRC_KEY[v.src] || (v.src.startsWith('提升') ? 'qBiz' : 'opBiz')] += +v.amount || 0;
+  return r;
 }
-const monthIncome = (y, m) => feeTotal(y, m) + S().incomes.filter(x => x.y === y && x.m === m).reduce((a, x) => a + (+x.amount || 0), 0);
+function manualMonth(y, m) {
+  const r = emptyMonth();
+  for (const x of (monthDoc(y, m).manual || {}).rows || []) { const a = +x.a || 0; if (x.k === 'sub') r.sub[x.l] = (r.sub[x.l] || 0) + a; else if (x.k in r) r[x.k] += a; }
+  return r;
+}
+// 這個月要用哪一種：補登、系統、還沒到（空白）
+const monthMode = (y, m) => m <= manualUntil(y) ? 'manual' : ymNum(y, m) > CYM ? 'future' : 'sys';
+function annual(y) {
+  const months = Array.from({ length: 12 }, (_, i) => { const mode = monthMode(y, i + 1); return { mode, d: mode === 'manual' ? manualMonth(y, i + 1) : mode === 'sys' ? sysMonth(y, i + 1) : null } });
+  const vals = k => months.map(x => x.d ? x.d[k] : null);
+  const sum = a => a.reduce((t, v) => t + (v || 0), 0);
+  const subs = []; months.forEach(x => x.d && Object.keys(x.d.sub).forEach(l => { if (!subs.includes(l)) subs.push(l) }));
+  const inc = AN_INC.map(([k, t]) => ({ k, t, v: vals(k) }));
+  const sub = subs.map(l => ({ k: 'sub', l, t: l, v: months.map(x => x.d ? (x.d.sub[l] ?? null) : null) }));
+  const other = vals('other'); if (sum(other)) sub.push({ k: 'other', t: '其他收入', v: other });
+  const groups = AN_GROUPS.map(g => ({ ...g, rows: g.rows.map(([k, t]) => ({ k, t, v: vals(k) })) }));
+  const wb = [{ k: 'wbHR', t: '人事', b: +N.wbPersonBudget || 0, v: vals('wbHR') }, { k: 'wbBiz', t: '業務', b: +N.wbBizTotal || 0, v: vals('wbBiz') }];
+  const adm = { k: 'adm', t: `${y}年度\n行管費`, b: +N.admBudget || 0, v: vals('adm') };
+  const incRows = [...inc, ...sub], expRows = [...groups.flatMap(g => g.rows), ...wb, adm];
+  const loss = months.map((x, i) => x.d ? sum(incRows.map(r => r.v[i])) - sum(expRows.map(r => r.v[i])) : null);
+  for (const r of [...incRows, ...expRows]) r.total = sum(r.v);
+  for (const r of [...wb, adm]) { r.left = r.b - r.total; r.pct = r.b ? r.total / r.b : 0 }
+  const incTotal = sum(incRows.map(r => r.total)), opTotal = sum(groups.flatMap(g => g.rows).map(r => r.total));
+  const expBudget = opTotal + sum([...wb, adm].map(r => r.b));     // 範本「支出(含補助)」：委辦和行管費用預算全額計
+  return { y, months, inc, sub, groups, wb, adm, incRows, expRows, loss, lossTotal: sum(loss), incTotal, expTotal: sum(expRows.map(r => r.total)), expBudget, opTotal };
+}
+function wbPersonUsed() { const A = annual(CY); return (manualUntil(CY) ? 0 : +N.wbPersonUsedBefore || 0) + A.wb[0].total; }
+function wbUsed(cat) {
+  let u = +(N.usedBefore || {})[cat] || 0; const mu = manualUntil(CY);
+  for (const v of vouchers()) if (v.y === CY && v.m > mu && v.src === '委辦費-業務費' && v.cat === cat) u += v.amount;
+  if (cat === N.firstItem) for (const d of yearMonths()) if (d.m > mu && d.payroll) u += +(d.supervisor ?? N.supervisor) || 0;
+  return u;
+}
+// 委辦業務費總共用了多少：有補登時用年度報表的數字（補登＋系統），沒有補登時用各細項加總（含啟用前已用）
+const wbBizUsed = () => manualUntil(CY) ? annual(CY).wb[1].total : wbItems().reduce((a, k) => a + wbUsed(k), 0);
+function monthExpense(y, m) { const A = annual(y); return A.expRows.reduce((t, r) => t + (r.v[m - 1] || 0), 0); }
+const monthIncome = (y, m) => { const A = annual(y); return A.incRows.reduce((t, r) => t + (r.v[m - 1] || 0), 0); };
 function getAlerts() {
   const a = [];
   if (+N.wbPersonBudget > 0) {
@@ -417,27 +459,30 @@ function earlierUnprinted(y, m) {
   return 0;
 }
 function report() {
-  const rows = []; for (let m = 1; m <= 12; m++) { if (m > CM) break; rows.push({ m, inc: monthIncome(CY, m), exp: monthExpense(CY, m) }); }
-  const ti = rows.reduce((a, r) => a + r.inc, 0), te = rows.reduce((a, r) => a + r.exp, 0);
+  const A = annual(CY), mu = manualUntil(CY);
   const wbB = +N.wbBizTotal || 0, wbU = wbBizUsed();
   const inc = S().incomes.filter(x => x.y === CY).sort((a, b) => a.m - b.m);
-  $('#headExtra').innerHTML = `<div class="actions"><button type="button" class="btn" id="exportYear">匯出 Excel</button><button type="button" class="btn primary" id="govReport">產出核銷報表</button></div>`;
+  $('#headExtra').innerHTML = `<div class="actions"><button type="button" class="btn" id="govReport">產出核銷報表</button></div>`;
   $('#view').innerHTML = `
-  <div class="tally"><span>年收入<b>${fmt(ti)}</b></span><span>年支出<b>${fmt(te)}</b></span><span class="${ti - te < 0 ? 'bad' : ''}">年盈餘<b>${fmt(ti - te)}</b></span></div>
-  <p class="hint">民國 ${CY} 年，依憑證月份歸月。月費收入來自「月費」，撥款收入在下方新增。系統啟用前的月份沒有資料。</p>
-  <div class="twocol">
-  <section><h2>委辦費使用情形</h2><div class="card">${bar('委辦人事費', wbPersonUsed(), +N.wbPersonBudget || 0)}${bar('委辦業務費', wbU, wbB)}</div></section>
-  <section><h2>每月損益</h2><div class="tablewrap"><table><thead><tr><th>月份</th><th class="num">收入</th><th class="num">支出</th><th class="num">損益</th></tr></thead>
-   <tbody>${rows.map(r => { const p = r.inc - r.exp; return `<tr><td>${r.m} 月</td><td class="num">${fmt(r.inc)}</td><td class="num">${fmt(r.exp)}</td><td class="num ${p < 0 ? 'neg' : ''}">${p < 0 ? '(' + fmt(-p) + ')' : fmt(p)}</td></tr>` }).join('')}</tbody></table></div></section>
-  </div>
+  <div class="tally"><span>年收入<b>${fmt(A.incTotal)}</b></span><span>年支出<b>${fmt(A.expTotal)}</b></span><span class="${A.lossTotal < 0 ? 'bad' : ''}">年盈餘<b>${fmt(A.lossTotal)}</b></span></div>
+  <section><h2>年度經費報表<small>民國 ${CY} 年，依憑證月份歸月</small></h2>
+   <div class="actions start"><button type="button" class="btn primary" id="printYear">列印（A4 橫式）</button><button type="button" class="btn" id="exportYear">匯出 Excel</button></div>
+   <div class="tablewrap anwrap">${annualHTML(A)}</div>
+   <div class="card" style="gap:8px">
+    <div class="title">系統啟用前的月份</div>
+    <p class="hint" style="font-size:15px">${mu ? `1–${mu} 月用從 Excel 補登的數字，${mu + 1} 月起用系統裡的資料。` : '還沒補登。系統啟用前的月份，可以從原本的 Excel（每月報表）匯入。'}</p>
+    <div class="actions start"><button type="button" class="btn" id="importYear">從 Excel 補登</button>${mu ? `<label class="check" style="font-weight:400">補登到<select id="muSel" style="width:auto;min-height:44px">${Array.from({ length: 13 }, (_, i) => `<option value="${i}" ${i === mu ? 'selected' : ''}>${i ? i + ' 月' : '不使用補登'}</option>`).join('')}</select></label>` : ''}</div>
+   </div>
+  </section>
+  <section><h2>委辦費使用情形</h2><div class="card">${bar('委辦人事費', wbPersonUsed(), +N.wbPersonBudget || 0)}${bar('委辦業務費', wbU, wbB)}${+N.admBudget ? bar(`${CY}年度行管費`, A.adm.total, +N.admBudget) : ''}</div></section>
   <section><h2>撥款收入<small>優化比、提升托育品質、縣府補助款，到帳那個月輸入</small></h2>
-   <div class="list">${inc.map(x => `<div class="row"><div class="main"><div class="title">${x.m} 月・${esc(x.source)}</div>${x.note ? `<div class="meta">${esc(x.note)}</div>` : ''}</div><span class="amount">${fmt(x.amount)}</span><button type="button" class="edit" data-delincome="${x.id}">刪除</button></div>`).join('') || '<div class="row"><div class="main meta">今年還沒有撥款收入。</div></div>'}</div>
+   <div class="list">${inc.map(x => `<div class="row"><div class="main"><div class="title">${x.m} 月・${esc(x.source === '縣府補助款' && x.label ? x.label : x.source)}</div>${x.note ? `<div class="meta">${esc(x.note)}</div>` : ''}</div><span class="amount">${fmt(x.amount)}</span><button type="button" class="edit" data-delincome="${x.id}">刪除</button></div>`).join('') || `<div class="row"><div class="main meta">${mu ? `${mu + 1} 月起還沒有撥款收入。` : '今年還沒有撥款收入。'}</div></div>`}</div>
    <div class="actions start"><button type="button" class="btn" id="addIncome">＋ 新增撥款收入</button></div>
   </section>
   <details class="card pickbox"><summary>委辦業務費細項（${wbItems().length} 項）</summary>
+  ${mu ? `<p class="hint" style="font-size:14px">1–${mu} 月是補登的總數，沒有分細項；細項的「已用」要在「設定 → 委辦費預算 → 啟用前已用」填各項目 1–${mu} 月用掉的金額。</p>` : ''}
   <div class="tablewrap"><table><thead><tr><th>項目</th><th class="num">預算</th><th class="num">已用</th><th class="num">剩餘</th><th style="min-width:120px">使用率</th></tr></thead>
-  <tbody>${wbItems().map(k => { const u = wbUsed(k), b = +(N.budget || {})[k] || 0, p = pct(u, b), cls = p >= 100 ? 'bad' : p >= 90 ? 'warn' : ''; return `<tr><td>${k}</td><td class="num">${fmt(b)}</td><td class="num">${fmt(u)}</td><td class="num ${b - u < 0 ? 'neg' : ''}">${fmt(b - u)}</td><td><div class="kpibar ${cls}"><i style="width:${Math.min(p, 100)}%"></i></div><span class="meta" style="margin:0">${b ? p + '%' : '—'}</span></td></tr>` }).join('')}</tbody>
-  <tfoot><tr><td>合計</td><td class="num">${fmt(wbB)}</td><td class="num">${fmt(wbU)}</td><td class="num">${fmt(wbB - wbU)}</td><td>${wbB ? pct(wbU, wbB) + '%' : ''}</td></tr></tfoot></table></div>
+  <tbody>${wbItems().map(k => { const u = wbUsed(k), b = +(N.budget || {})[k] || 0, p = pct(u, b), cls = p >= 100 ? 'bad' : p >= 90 ? 'warn' : ''; return `<tr><td>${k}</td><td class="num">${fmt(b)}</td><td class="num">${fmt(u)}</td><td class="num ${b - u < 0 ? 'neg' : ''}">${fmt(b - u)}</td><td><div class="kpibar ${cls}"><i style="width:${Math.min(p, 100)}%"></i></div><span class="meta" style="margin:0">${b ? p + '%' : '—'}</span></td></tr>` }).join('')}</tbody></table></div>
   <div class="actions start"><button type="button" class="btn" data-go="set">調整預算或挪用</button></div></details>`;
 }
 function vou() {
@@ -540,7 +585,7 @@ function set() {
   </details>
   <details class="card pickbox" ${!+N.wbBizTotal ? 'open' : ''}><summary>委辦費預算（每年 1/1 依契約書輸入）</summary>
    <div class="two"><label>委辦人事費<input type="number" id="sPB" inputmode="numeric" value="${N.wbPersonBudget || ''}"></label><label>系統啟用前已用的人事費<input type="number" id="sPU" inputmode="numeric" value="${N.wbPersonUsedBefore || ''}"></label></div>
-   <label>委辦業務費總額<input type="number" id="sBT" inputmode="numeric" value="${N.wbBizTotal || ''}"></label>
+   <div class="two"><label>委辦業務費總額<input type="number" id="sBT" inputmode="numeric" value="${N.wbBizTotal || ''}"></label><label>${CY}年度行管費<input type="number" id="sAdm" inputmode="numeric" value="${N.admBudget || ''}"></label></div>
    <p class="hint" style="font-size:14px">各細項預算加總要等於業務費總額。年中要挪用時，直接改兩個項目的預算即可。「啟用前已用」只有今年開始使用系統前已經花掉的金額要填。</p>
    <div class="tablewrap bgrid"><table><thead><tr><th>項目</th><th>預算</th><th>啟用前已用</th></tr></thead><tbody>
     ${wbItems().map((k, i) => `<tr><td>${k}</td><td><input type="number" inputmode="numeric" data-bud="${i}" value="${B[k] || ''}"></td><td><input type="number" inputmode="numeric" data-used="${i}" value="${U[k] || ''}"></td></tr>`).join('')}
@@ -573,7 +618,7 @@ const HELP = [
   { id: 'cash', t: '零用金結算', shot: 'cash', steps: ['每月兩次，到「更多 → 零用金結算」。', '清單只列主任代墊的發票，照憑證編號排列，會計可以拿著憑證依序對帳。', '按「結算到今天」。還有發票沒做憑證、憑證沒印的，會先提醒你。', '結算過的清單在下方「已結算」，可以再列印。'] },
   { id: 'staff', t: '人事費', shot: 'staff', steps: ['薪資清冊做好後，到「更多 → 人事費」。', '每位員工填這個月的金額，經費來源預設委辦費-人事費。', '委辦人事費不夠時，按那位員工的「拆單」，填委辦費付多少，其餘自動改由營運收入支應。', '按「儲存本月人事費」。生日禮金、代班薪資、年終獎金在下方新增。'] },
   { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。'] },
-  { id: 'report', t: '報表', shot: 'report', steps: ['「報表」自動算每月收入、支出、損益，和委辦費已用幾 %。', '優化比、提升托育品質、縣府補助款到帳時，按「＋ 新增撥款收入」。', '要交縣府時按「產出核銷報表」，選期間後列印。', '「匯出 Excel」可以下載年度總表；業務費明細在「憑證與列印」匯出。'] },
+  { id: 'report', t: '報表', shot: 'report', steps: ['「年度經費報表」照每月報表的格式，自動算每月收入、支出、損益，和委辦費、行管費用了幾 %。', '優化比、提升托育品質、縣府補助款到帳時，按「＋ 新增撥款收入」；補助款要選期別（第一期、第二期⋯），每一期各一列。', '按「列印（A4 橫式）」印一頁；按「匯出 Excel」下載和原本格式一樣的 Excel（標楷體、顏色、公式）。', '系統啟用前的月份，按「從 Excel 補登」選原本的經費明細檔，核對數字後按「補登」。要交縣府時按「產出核銷報表」。'] },
   { id: 'trash', t: '刪錯了怎麼辦', shot: 'trash', steps: ['刪除的發票、取消的憑證會在「更多 → 垃圾桶」放 30 天。', '按「救回」就回到原本的地方，任何一台裝置都能救。', '剛刪掉時，畫面下方的提示也有「復原」可以按。'] },
   { id: 'backup', t: '備份與還原', shot: 'backup', steps: ['建議每個月到「更多 → 設定 → 備份」按「下載備份」，存到電腦。', '萬一資料被改錯，按「從備份還原」，選那個備份檔。', '還原前會先自動下載一份目前的資料，還原錯了還能再還原回來。', '備份之後才新增的資料不會被刪掉。'] },
   { id: 'install', t: '安裝成 App', steps: ['iPhone、iPad：用 Safari 開啟，按分享 →「加入主畫面」。', 'Android：用 Chrome 開啟，按右上選單 →「加到主畫面」或「安裝應用程式」。', '電腦（Windows、Mac、Chromebook）：用 Chrome 或 Edge 開啟，按網址列右邊的安裝圖示。', '從 LINE 點開的話，請先選「用預設瀏覽器開啟」，登入才會留下來。'] },
@@ -627,6 +672,143 @@ function receiptPage(k, no, y, m) {
    <div style="font-size:14px;margin-top:4px">經手人：</div></div><div class="side-note">${lab}</div></div>`;
   return one('第一聯：協會留存聯') + '<div class="rcut"></div>' + one('第二聯：公托留存聯') + '<div class="rcut"></div>' + one('第三聯：家長留存聯');
 }
+// 金額寫法照範本：$1,234；負數 ($1,234)
+const money = v => v == null ? '' : v < 0 ? `<span class="neg">(${'$' + fmt(-v)})</span>` : '$' + fmt(v);
+const ZERO_BLANK = new Set(['fee', 'opt', 'q', 'sub', 'other', 'qHR', 'qBiz', 'adm']);
+const cellV = (r, v) => v == null || (v === 0 && ZERO_BLANK.has(r.k)) ? '' : money(v);
+const anTitle = () => `${N.full.startsWith('高雄市') ? '高雄市' : '屏東縣'}政府委託${N.assoc}辦理<br>${N.full}`;
+function annualHTML(A) {
+  const mcells = r => r.v.map((v, i) => `<td class="m${A.months[i].mode === 'manual' ? ' man' : ''}">${cellV(r, v)}</td>`).join('');
+  let h = `<table class="antable"><thead><tr class="an-h"><th colspan="3"></th>${Array.from({ length: 12 }, (_, i) => `<th>${i + 1}月</th>`).join('')}<th>總額</th><th></th></tr></thead><tbody>`;
+  A.inc.forEach((r, i) => h += `<tr class="an-lav"><th colspan="3">${r.t}</th>${mcells(r)}<td class="m">${money(r.total)}</td>${i === 0 ? `<th rowspan="${A.inc.length}" class="anside">年收入</th>` : ''}</tr>`);
+  A.sub.forEach((r, i) => h += `<tr class="an-yel"><th colspan="3">${esc(r.t)}</th>${mcells(r)}<td class="m">${money(r.total)}</td>${i === 0 ? `<th rowspan="${A.sub.length}" class="anside"></th>` : ''}</tr>`);
+  A.groups.forEach(g => g.rows.forEach((r, i) => h += `<tr class="${g.key === 'op' ? 'an-blue' : 'an-green'}">${i === 0 ? `<th rowspan="${g.rows.length}">${g.g.replace('\n', '<br>')}</th>` : ''}<th colspan="2">${r.t}</th>${mcells(r)}<td class="m">${money(r.total)}</td>${i === 0 ? `<th rowspan="${g.rows.length}" class="anside">${g.key === 'op' ? '年支出' : '支出'}</th>` : ''}</tr>`));
+  A.wb.forEach((r, i) => h += `<tr class="an-green">${i === 0 ? '<th rowspan="2" class="an-lavc">委辦支出</th>' : ''}<th>${r.t}</th><td class="m">${money(r.b)}</td>${mcells(r)}<td class="m">${money(r.left)}</td><td class="anside">${r.b ? Math.round(r.pct * 100) + '%' : ''}</td></tr>`);
+  h += `<tr class="an-gray"><th colspan="2" class="admlab">${A.adm.t.replace('\n', '<br>')}</th><td class="m">${money(A.adm.b)}</td>${mcells(A.adm)}<td class="m">${money(A.adm.left)}</td><td class="anside">${A.adm.b ? Math.round(A.adm.pct * 100) + '%' : ''}</td></tr>`;
+  h += `<tr class="an-lav"><th colspan="3">每月損益</th>${A.loss.map(v => `<td class="m">${money(v)}</td>`).join('')}<td class="m">${money(A.lossTotal)}</td><th class="anside">年盈餘</th></tr></tbody></table>`;
+  h += `<table class="anbox"><tr><th>收入（含補助）</th><td>${money(A.incTotal)}</td></tr><tr><th>支出（含補助）</th><td>${money(A.expBudget)}</td></tr><tr><th>盈餘（含補助）</th><td>${money(A.incTotal - A.expBudget)}</td></tr></table>`;
+  return h;
+}
+function annualPrint(A) {
+  return `<div class="anprint"><div class="antitle">${anTitle()}</div>${annualHTML(A)}
+  <p class="annote">「支出（含補助）」的委辦人事費、委辦業務費、行管費以預算全額計算。${manualUntil(A.y) ? `1–${manualUntil(A.y)} 月為系統啟用前補登的數字。` : ''}列印日期 ${CY}/${CM}/${CD}</p></div>`;
+}
+// 匯出 Excel：版面、顏色、框線、公式都照範本
+function annualSheet(A) {
+  const C = {}, M = [], rows = { 1: 42.75 }, FMT = '"$"#,##0_);[Red]\\("$"#,##0\\)';
+  const col = i => String.fromCharCode(65 + i);                 // 0→A
+  const put = (ref, v, st, f) => C[ref] = { v, f, s: st };
+  const fill = { h: 'FAEDA0', lav: 'E5DFEC', yel: 'FFFFCC', blue: 'DAEEF3', green: 'EAF1DD', gray: 'F2F2F2' };
+  const box = (r1, c1, r2, c2, v, st) => { for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) put(col(c) + r, r === r1 && c === c1 ? v : null, st); if (r1 !== r2 || c1 !== c2) M.push(`${col(c1)}${r1}:${col(c2)}${r2}`) };
+  const t = `${N.full.startsWith('高雄市') ? '高雄市' : '屏東縣'}政府委託${N.assoc}辦理\n${N.full}`;
+  box(1, 0, 1, 16, t, { wrap: true, border: false });
+  box(2, 0, 2, 2, null, { fill: fill.h });
+  for (let m = 0; m < 12; m++) put(col(3 + m) + 2, `${m + 1}月`, { fill: fill.h });
+  put('P2', '總額', { fill: fill.h }); put('Q2', null, { fill: fill.h });
+  let r = 3;
+  const monthRow = (row, f, rr) => { row.v.forEach((v, i) => put(col(3 + i) + rr, v == null || (v === 0 && ZERO_BLANK.has(row.k)) ? null : v, { fill: f, fmt: FMT })) };
+  const sumRow = (rr, f) => put('P' + rr, null, { fill: f, fmt: FMT }, `SUM(D${rr}:O${rr})`);
+  const incStart = r;
+  A.inc.forEach((row, i) => { box(r, 0, r, 2, row.t, { fill: fill.lav }); monthRow(row, fill.lav, r); sumRow(r, fill.lav); C['P' + r].v = row.total; r++ });
+  box(incStart, 16, r - 1, 16, '年收入', { fill: fill.lav });
+  if (A.sub.length) { const s0 = r; A.sub.forEach(row => { box(r, 0, r, 2, row.t, { fill: fill.yel }); monthRow(row, fill.yel, r); sumRow(r, fill.yel); C['P' + r].v = row.total; r++ }); box(s0, 16, r - 1, 16, null, { fill: fill.yel }) }
+  const incEnd = r - 1, opStart = r;
+  for (const g of A.groups) {
+    const f = g.key === 'op' ? fill.blue : fill.green, g0 = r;
+    g.rows.forEach(row => { box(r, 1, r, 2, row.t, { fill: f }); monthRow(row, f, r); sumRow(r, f); C['P' + r].v = row.total; r++ });
+    box(g0, 0, r - 1, 0, g.g, { fill: f, wrap: true }); box(g0, 16, r - 1, 16, g.key === 'op' ? '年支出' : '支出', { fill: f });
+  }
+  const opEnd = r - 1, wb0 = r;
+  A.wb.forEach(row => {
+    put('B' + r, row.t, { fill: fill.green }); put('C' + r, row.b, { fill: fill.green, fmt: FMT }); monthRow(row, fill.green, r);
+    put('P' + r, row.left, { fill: fill.green, fmt: FMT }, `C${r}-SUM(D${r}:O${r})`); put('Q' + r, row.pct, { fill: fill.green, fmt: '0%' }, `IF(C${r}=0,0,1-P${r}/C${r})`); r++;
+  });
+  box(wb0, 0, r - 1, 0, '委辦支出', { fill: fill.lav });
+  const adm = r; rows[r] = 30.6;
+  box(r, 0, r, 1, A.adm.t, { fill: fill.gray, bold: true, color: '003399', wrap: true }); put('C' + r, A.adm.b, { fill: fill.gray, fmt: FMT }); monthRow(A.adm, fill.gray, r);
+  put('P' + r, A.adm.left, { fill: fill.gray, fmt: FMT }, `C${r}-SUM(D${r}:O${r})`); put('Q' + r, A.adm.pct, { fill: fill.gray, fmt: '0%' }, `IF(C${r}=0,0,1-P${r}/C${r})`); r++;
+  box(r, 0, r, 2, '每月損益', { fill: fill.lav });
+  A.loss.forEach((v, i) => { const c = col(3 + i); put(c + r, v, { fill: fill.lav, fmt: FMT }, `SUM(${c}${incStart}:${c}${incEnd})-SUM(${c}${opStart}:${c}${adm})`) });
+  put('P' + r, A.lossTotal, { fill: fill.lav, fmt: FMT }, `SUM(D${r}:O${r})`); put('Q' + r, '年盈餘', { fill: fill.lav }); r += 2;
+  const lab = { align: 'left' }, val = { align: 'left', fmt: '"$"#,##0;[Red]"$"#,##0' };
+  box(r, 1, r, 2, '收入(含補助)', lab); box(r, 3, r, 4, A.incTotal, val); C['D' + r].f = `SUM(P${incStart}:P${incEnd})`;
+  box(r + 1, 1, r + 1, 2, '支出(含補助)', lab); box(r + 1, 3, r + 1, 4, A.expBudget, val); C['D' + (r + 1)].f = `SUM(P${opStart}:P${opEnd},C${wb0}:C${adm})`;
+  box(r + 2, 1, r + 2, 2, '盈餘(含補助)', lab); box(r + 2, 3, r + 2, 4, A.incTotal - A.expBudget, val); C['D' + (r + 2)].f = `D${r}-D${r + 1}`;
+  return { name: '每月報表', cells: C, merges: M, rows, landscape: true, cols: [10.75, 4.25, 12, 12.5, 12.5, 14.4, 13.9, 12.5, 12.5, 12.6, 13.4, 12.5, 12.5, 12.5, 12.5, 16.6, 7.5] };
+}
+async function exportYear() {
+  try {
+    const { writeXlsx } = await import('./xlsx.js');
+    const blob = writeXlsx(annualSheet(annual(CY)));
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${N.short}經費明細-${CY}年.xlsx`; document.body.appendChild(a); a.click(); a.remove();
+    toast('已匯出 Excel。');
+  } catch (e) { console.error(e); toast('匯出沒有成功，請再試一次。') }
+}
+// 從 Excel 補登：讀「每月報表」，依左邊的名稱對應到系統的列別
+function mapImported(cells) {
+  const at = (c, r) => cells[c + r], txt = v => v == null ? '' : String(v).replace(/\s+/g, '');
+  let head = 0, mcol = {};
+  for (let r = 1; r <= 60 && !head; r++) { const m = {}; for (let i = 0; i < 26; i++) { const c = colName(i), t = txt(at(c, r)); const mm = /^(\d{1,2})月$/.exec(t); if (mm) m[+mm[1]] = c } if (m[1] && m[12]) { head = r; mcol = m } }
+  if (!head) return null;
+  const months = Array.from({ length: 12 }, () => []), budgets = {}, unknown = [];
+  let group = '';
+  const put = (m, row) => { if (row.a) months[m - 1].push(row) };
+  const num = v => typeof v === 'number' ? Math.round(v) : 0;
+  for (let r = head + 1; r <= head + 60; r++) {
+    const A = txt(at('A', r)), B = txt(at('B', r));
+    if (!A && !B) continue;
+    if (A === '總收入' || A.includes('含補助') || B.includes('含補助')) break;
+    if (A.includes('每月損益') || A.includes('年盈餘')) { group = ''; continue }
+    if (A && B) group = A; else if (A) group = '';
+    let k = null, l = null;
+    const g = group;
+    if (g) {
+      const sub = B.includes('人事') ? 'HR' : B.includes('業務') ? 'Biz' : B.includes('年終') ? 'Bonus' : B.includes('餐') ? 'Meal' : B.includes('保險') ? 'Ins' : '';
+      if (/營運|自籌/.test(g) && sub) k = 'op' + sub;
+      else if (g.includes('提升') && (sub === 'HR' || sub === 'Biz')) k = 'q' + sub;
+      else if (g.includes('委辦') && (sub === 'HR' || sub === 'Biz')) { k = 'wb' + sub; if (typeof at('C', r) === 'number') budgets[k] = num(at('C', r)) }
+    } else if (A === '月費收入') k = 'fee';
+    else if (A === '優化比') k = 'opt';
+    else if (A === '提升托育品質') k = 'q';
+    else if (A.includes('行管費')) { k = 'adm'; if (typeof at('C', r) === 'number') budgets.adm = num(at('C', r)) }
+    else if (A.includes('補助')) { k = 'sub'; l = String(at('A', r)).trim() }
+    if (!k) { unknown.push(String(at('A', r) || '') + String(at('B', r) || '')); continue }
+    for (let m = 1; m <= 12; m++) put(m, { k, ...(l ? { l } : {}), a: num(at(mcol[m], r)) });
+  }
+  return { months, budgets, unknown };
+}
+function importPreview(res, file) {
+  const keys = [...AN_INC, ['sub', '縣府補助款'], ...AN_GROUPS.flatMap(g => g.rows.map(([k, t]) => [k, (g.key === 'op' ? '營運' : '提升') + t])), ['wbHR', '委辦人事'], ['wbBiz', '委辦業務'], ['adm', '行管費']];
+  const tot = (m, k) => res.months[m].filter(x => x.k === k).reduce((a, x) => a + x.a, 0);
+  const def = Math.max(0, Math.min(12, CM - 1));
+  const B = res.budgets;
+  ask('從 Excel 補登', `<p class="hint">讀到「${esc(file)}」的每月報表。請核對下面的數字和 Excel 一樣（單位：元）。</p>
+   <div class="tablewrap" style="max-height:40vh;overflow:auto"><table class="imptable"><thead><tr><th>項目</th>${Array.from({ length: 12 }, (_, i) => `<th class="num">${i + 1}月</th>`).join('')}</tr></thead><tbody>
+   ${keys.map(([k, t]) => `<tr><td>${t}</td>${Array.from({ length: 12 }, (_, m) => `<td class="num">${tot(m, k) ? fmt(tot(m, k)) : ''}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+   ${res.unknown.length ? `<p class="hint" style="font-size:14px">沒有對應到的列（不會匯入）：${res.unknown.map(esc).join('、')}</p>` : ''}
+   <div class="two"><label>年度<select id="impY"><option value="${CY}">民國 ${CY} 年</option><option value="${CY - 1}">民國 ${CY - 1} 年</option></select></label>
+   <label>補登到幾月<select id="impM">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${i + 1 === def ? 'selected' : ''}>${i + 1} 月</option>`).join('')}</select></label></div>
+   <p class="hint" style="font-size:14px">補登的月份用 Excel 的數字；之後的月份用系統裡的資料。之後可以在報表頁改。</p>
+   ${B.wbHR || B.wbBiz || B.adm ? `<label class="check"><input type="checkbox" id="impB" checked> 預算也一起更新：委辦人事費 ${fmt(B.wbHR || 0)}、委辦業務費 ${fmt(B.wbBiz || 0)}、行管費 ${fmt(B.adm || 0)}</label>` : ''}`, () => {
+    const y = +$('#impY').value, mu = +$('#impM').value;
+    const ops = res.months.map((rows, i) => ({ c: 'months', id: ymKey(y, i + 1), data: { y, m: i + 1, manual: { rows, at: Date.now() } } }));
+    store.batch(ops).catch(fail());
+    const patch = { manualUntil: { ...(N.manualUntil || {}), [y]: mu } };
+    if ($('#impB') && $('#impB').checked) { if (B.wbHR) patch.wbPersonBudget = B.wbHR; if (B.wbBiz) patch.wbBizTotal = B.wbBiz; if (B.adm) patch.admBudget = B.adm }
+    store.setSettings(patch).catch(fail());
+    toast(`已補登 ${y} 年 1–${mu} 月。`);
+  }, '補登');
+}
+$('#importFile').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try {
+    const { readXlsx } = await import('./xlsx.js');
+    const x = await readXlsx(await f.arrayBuffer(), '每月報表');
+    const res = mapImported(x.cells);
+    if (!res) return toast(`在「${x.sheet}」找不到 1月到 12月的標題列，請確認是每月報表。`);
+    importPreview(res, f.name);
+  } catch (err) { console.error(err); toast('這個檔案讀不出來，請確認是 Excel 檔（.xlsx）。') }
+});
 function govSheet(f, t) {
   let pers = 0, biz = 0, op = 0, total = 0, wbP = 0;
   for (let m = f; m <= t; m++) {
@@ -655,7 +837,7 @@ function loadKai() {
   document.head.appendChild(l);
 }
 function openPreview(o) {
-  loadKai();
+  loadKai(); PV.land = !!o.land; $('#pvView').classList.toggle('land', PV.land);
   PV.pages = o.pages; PV.onPrint = o.onPrint || null;
   $('#pTitle').textContent = o.title;
   $('#pTools').innerHTML = o.tools || ''; $('#pTools').hidden = !o.tools;
@@ -664,10 +846,10 @@ function openPreview(o) {
   $('#pGo').setAttribute('aria-disabled', String(!PV.pages.length));
   if (!$('#dlgPrint').open) $('#dlgPrint').showModal();
   const keep = o.keep ? PV.i : 0;
-  $('#pvStrip').innerHTML = PV.pages.length ? PV.pages.map(p => `<div class="a4slot"><div class="a4box"><div class="a4">${p}</div></div></div>`).join('') : '<div class="a4slot"><div class="empty" style="margin:24px">這一批沒有勾選的頁面。</div></div>';
+  $('#pvStrip').innerHTML = PV.pages.length ? PV.pages.map(p => `<div class="a4slot"><div class="a4box"><div class="a4${PV.land ? ' land' : ''}">${p}</div></div></div>`).join('') : '<div class="a4slot"><div class="empty" style="margin:24px">這一批沒有勾選的頁面。</div></div>';
   pvFit(); pvGo(keep, false);
 }
-function pvFit() { const vp = $('#pvView'); if (!vp.clientWidth) return; const s = Math.min(1, (vp.clientWidth - 24) / 794, Math.max(300, innerHeight * .55) / 1123); vp.style.setProperty('--s', s.toFixed(4)) }
+function pvFit() { const vp = $('#pvView'); if (!vp.clientWidth) return; const [w, h] = PV.land ? [1123, 794] : [794, 1123]; const s = Math.min(1, (vp.clientWidth - 24) / w, Math.max(300, innerHeight * .55) / h); vp.style.setProperty('--s', s.toFixed(4)) }
 function pvGo(i, anim = true) {
   const n = PV.pages.length; PV.i = Math.max(0, Math.min(i, n - 1));
   const st = $('#pvStrip');
@@ -699,7 +881,8 @@ function pvGo(i, anim = true) {
 })();
 $('#pGo').onclick = async () => {
   if (!PV.pages.length) return toast('這一批沒有勾選要印的頁面。');
-  $('#printArea').innerHTML = PV.pages.map(p => `<div class="a4">${p}</div>`).join('');
+  $('#printArea').innerHTML = PV.pages.map(p => `<div class="a4${PV.land ? ' land' : ''}">${p}</div>`).join('');
+  $('#pageSize').textContent = PV.land ? '@page{size:A4 landscape;margin:0}' : '';
   try { await Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 2000))]) } catch (e) { }   // 等字型載好再印
   window.print();
   if (PV.onPrint) PV.onPrint();
@@ -1021,13 +1204,6 @@ function exportBiz() {
   rows.push(['合計', '', '', '', ...cols.map(c => list.filter(v => colOf(v) === c).reduce((a, v) => a + v.amount, 0)), list.reduce((a, v) => a + v.amount, 0)]);
   if (download(`${N.short}業務費經費明細-${CY}年.csv`, csv(rows), 'text/csv')) toast('已匯出，Excel 可以直接開啟。');
 }
-function exportYear() {
-  const rows = [['月份', '收入', '支出', '損益']];
-  for (let m = 1; m <= CM; m++) { const i = monthIncome(CY, m), e = monthExpense(CY, m); rows.push([m + '月', i, e, i - e]); }
-  rows.push([]); rows.push(['委辦業務費細項', '預算', '已用', '剩餘']);
-  for (const k of wbItems()) { const b = +(N.budget || {})[k] || 0, u = wbUsed(k); rows.push([k, b, u, b - u]); }
-  if (download(`${N.short}年度總表-${CY}年.csv`, csv(rows), 'text/csv')) toast('已匯出，Excel 可以直接開啟。');
-}
 const BK_COLS = ['invoices', 'vouchers', 'settlements', 'kids', 'incomes'];
 async function backup(label = '') {
   if (!navigator.onLine && !DEMO) { toast('下載備份需要網路，才能拿到完整的資料。'); return false }
@@ -1197,12 +1373,19 @@ document.addEventListener('click', e => {
       store.set('months', ymKey(y, m), { y, m, payroll: rows, supervisor: +$('#supAmt').value || 0 }).catch(fail());
       return toast(`已儲存 ${m} 月人事費。`);
     }
-    case 'addIncome': return ask('新增撥款收入', `<div class="two"><label>到帳月份<select id="inM">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${i + 1 === CM ? 'selected' : ''}>${i + 1} 月</option>`).join('')}</select></label><label>來源<select id="inS">${INCOME_SRC.map(s => `<option>${s}</option>`).join('')}</select></label></div><label>金額<input type="number" inputmode="numeric" id="inA"></label><label>說明（選填，例如：第二期補助款）<input type="text" id="inN"></label>`, () => {
+    case 'addIncome': { const periods = [`${CY - 1}年第四期補助款`, '第一期補助款', '第二期補助款', '第三期補助款', '第四期補助款'];
+      return ask('新增撥款收入', `<div class="two"><label>到帳月份<select id="inM">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${i + 1 === CM ? 'selected' : ''}>${i + 1} 月</option>`).join('')}</select></label><label>來源<select id="inS">${INCOME_SRC.map(s => `<option>${s}</option>`).join('')}</select></label></div>
+      <div id="inPWrap" hidden><label>期別（年度報表上每一期各一列）<select id="inP">${periods.map(p => `<option>${p}</option>`).join('')}<option value="__other">其他（自己填）</option></select></label><label id="inPOther" hidden>名稱<input type="text" id="inPO" placeholder="例如：契變第一~第三期補助款差額"></label></div>
+      <label>金額<input type="number" inputmode="numeric" id="inA"></label><label>說明（選填）<input type="text" id="inN"></label>`, () => {
       const a = +$('#inA').value || 0; if (!(a > 0)) { toast('請填金額。'); return false }
-      const m = +$('#inM').value; store.set('incomes', store.newId('incomes'), { y: CY, m, ym: ymNum(CY, m), source: $('#inS').value, amount: a, note: $('#inN').value.trim(), createdAt: Date.now() }, false).catch(fail()); toast('已新增。')
-    }, '新增');
+      const src = $('#inS').value; let label = '';
+      if (src === '縣府補助款') { label = $('#inP').value === '__other' ? $('#inPO').value.trim() : $('#inP').value; if (!label) { toast('請填補助款名稱。'); return false } }
+      const m = +$('#inM').value; store.set('incomes', store.newId('incomes'), { y: CY, m, ym: ymNum(CY, m), source: src, label, amount: a, note: $('#inN').value.trim(), createdAt: Date.now() }, false).catch(fail()); toast('已新增。')
+    }, '新增'); }
     case 'exportBiz': return exportBiz();
     case 'exportYear': return exportYear();
+    case 'printYear': return openPreview({ title: `年度經費報表（${CY} 年）`, pages: [annualPrint(annual(CY))], land: true });
+    case 'importYear': return $('#importFile').click();
     case 'govReport': return ask('產出核銷報表', `<div class="two"><label>從<select id="gF">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}">${i + 1} 月</option>`).join('')}</select></label><label>到<select id="gT">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${i + 1 === Math.min(6, CM) ? 'selected' : ''}>${i + 1} 月</option>`).join('')}</select></label></div><p class="hint">會產出這段期間的總支出、人事費／業務費／營運收入各支出多少，以及委辦費已用幾 %、還剩多少。明細請另外匯出業務費明細 Excel。</p>`, () => {
       const f = +$('#gF').value, t2 = +$('#gT').value; if (f > t2) { toast('開始月份不能晚於結束月份。'); return false }
       setTimeout(() => openPreview({ title: `核銷報表（${f}–${t2} 月）`, pages: [govSheet(f, t2)] }), 0);
@@ -1222,7 +1405,7 @@ document.addEventListener('click', e => {
       const budget = {}, usedBefore = {};
       wbItems().forEach((k, i) => { budget[k] = +document.querySelector(`[data-bud="${i}"]`).value || 0; usedBefore[k] = +document.querySelector(`[data-used="${i}"]`).value || 0 });
       const total = +$('#sBT').value || 0, sum = Object.values(budget).reduce((a, b) => a + b, 0);
-      store.setSettings({ budget, usedBefore, wbBizTotal: total, wbPersonBudget: +$('#sPB').value || 0, wbPersonUsedBefore: +$('#sPU').value || 0 }).catch(fail());
+      store.setSettings({ budget, usedBefore, wbBizTotal: total, wbPersonBudget: +$('#sPB').value || 0, wbPersonUsedBefore: +$('#sPU').value || 0, admBudget: +$('#sAdm').value || 0 }).catch(fail());
       return toast(total && sum !== total ? `已儲存，但細項合計 ${fmt(sum)} 和總額 ${fmt(total)} 不一樣，請再確認。` : '已儲存預算。');
     }
     case 'addCat': { const name = $('#sNewCat').value.trim(); if (!name) return toast('請填類別名稱。'); addCategory(name, $('#sNewSrc').value); return toast(`已新增類別「${name}」。`) }
@@ -1230,6 +1413,9 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('change', e => {
   const t = e.target;
+  if (t.id === 'muSel') { store.setSettings({ manualUntil: { ...(N.manualUntil || {}), [CY]: +t.value } }).catch(fail()); return toast(+t.value ? `改成補登到 ${t.value} 月。` : '不使用補登的數字。') }
+  if (t.id === 'inS') { $('#inPWrap').hidden = t.value !== '縣府補助款'; return }
+  if (t.id === 'inP') { $('#inPOther').hidden = t.value !== '__other'; return }
   if (t.dataset.vpick) { t.checked ? VP.chosen.add(t.dataset.vpick) : VP.chosen.delete(t.dataset.vpick); return showVP(true) }
 });
 document.addEventListener('input', e => {
