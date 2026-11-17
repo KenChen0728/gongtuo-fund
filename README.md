@@ -25,6 +25,8 @@
 | data.js | 資料層：Firebase 正式模式、範例模式 |
 | sample.js | 範例資料（全部虛構） |
 | sw.js | 離線開啟與更新 |
+| help/ | 使用說明的畫面截圖（範例資料） |
+| tools/help_shots.py | 重新產生說明截圖：先在專案資料夾開 `python3 -m http.server 8765`，再執行這支 |
 
 ## 資料結構（Firestore）
 - `members/{帳號電子郵件}`：`nursery`
@@ -34,7 +36,11 @@
 存取規則在 Firebase 主控台，每間公托只讀寫得到自己的資料。
 
 ## 退回上一版
-GitHub → 這個 repository → Commits，找到要退回的版本，按「Revert」，或請 Claude 協助。
+每次較大的修改前會留一個備份分支，名稱是 `backup-<版本號>`（例如 `backup-2026.11.17.4`）。
+要退回時：GitHub → 這個 repository → Commits，找到要退回的版本按「Revert」；或把 main 重設到備份分支，或請 Claude 協助。
+
+## 資料還原
+設定 → 備份 →「從備份還原」。只能還原同一間公托的備份；還原前會先自動下載目前資料。備份裡有的資料改回備份當時的內容，之後新增的資料保留。
 
 ## 注意
 - 不要把序號、真實名單或任何個資放進這個 repository。
