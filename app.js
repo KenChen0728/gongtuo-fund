@@ -1,7 +1,7 @@
 import { createFirebaseStore, createDemoStore } from './data.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.17.6';
+const VERSION = '2026.11.17.7';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -968,7 +968,28 @@ function ask(title, body, onOk, okText, okClass) {
   $('#dlgAsk').showModal();
 }
 document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => b.closest('dialog').close());
-document.querySelectorAll('dialog:not(#dlgAlert)').forEach(d => d.addEventListener('click', e => { if (e.target === d) d.close() }));
+// 點視窗外面關閉：只有真的點在框外才算（框內的空白邊不算）；
+// 有輸入東西的視窗（發票、幼兒、建立憑證、一步一步、簡單表單）打了字就不會因為點外面或按 Esc 而不見，要按「取消」才放棄
+const GUARDED = ['dlgInv', 'dlgKid', 'dlgMerge', 'dlgWiz', 'dlgAsk'];
+const isDirty = d => d.dataset.dirty === '1';
+const KEEP_MSG = '還沒儲存，打的內容都還在。要放棄這次輸入，請按「取消」。';
+document.querySelectorAll('dialog:not(#dlgAlert)').forEach(d => {
+  d.addEventListener('click', e => {
+    if (e.target !== d) return;
+    const r = d.getBoundingClientRect();
+    const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    if (inside) return;
+    if (GUARDED.includes(d.id) && isDirty(d)) return toast(KEEP_MSG);
+    d.close();
+  });
+  if (!GUARDED.includes(d.id)) return;
+  const mark = e => { if (e.target.matches('input,select,textarea')) d.dataset.dirty = '1' };
+  d.addEventListener('input', mark); d.addEventListener('change', mark);
+  d.addEventListener('cancel', e => { if (isDirty(d)) { e.preventDefault(); toast(KEEP_MSG) } });   // Esc、Android 返回鍵
+  d.addEventListener('close', () => { d.dataset.dirty = '' });
+});
+// 一步一步模式：選過任何一步就算有輸入，完成儲存後就不算
+$('#dlgWiz').addEventListener('click', e => { const b = e.target.closest('[data-wiz]'); if (!b) return; const a = b.dataset.wiz; if (['payer', 'day', 'cat', 'next'].includes(a)) $('#dlgWiz').dataset.dirty = '1'; if (a === 'save' || a === 'again') $('#dlgWiz').dataset.dirty = '' }, true);
 $('#dlgAlert').addEventListener('cancel', e => { e.preventDefault(); toast('請先勾選「我已了解」，再按「已了解」。') });
 $('#alertOk').addEventListener('change', e => $('#alertGo').setAttribute('aria-disabled', String(!e.target.checked)));
 $('#fAlert').addEventListener('submit', e => { if (!$('#alertOk').checked) { e.preventDefault(); toast('請先勾選「我已了解」，再按「已了解」。'); return } ls.set('gongtuo.ack.' + NID, TODAY_ISO) });
