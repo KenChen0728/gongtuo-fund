@@ -34,6 +34,7 @@
     <p class="hint" id="lineHint" style="font-size:14px" hidden>你現在是在 LINE 裡開啟，這裡的登入不會留下來。請按右下角的選單，選「用 Safari 開啟」或「用預設瀏覽器開啟」。</p>
   </form>
   <button type="button" class="btn" id="tryDemo">先用範例資料試試看（不會存檔）</button>
+  <p class="copyright">© 2026 公托經費記帳・僅供四間公托內部使用</p>
 </div>
 
 <div class="wrap" id="app" data-view="home" hidden>
@@ -64,7 +65,7 @@
     <div class="status info" id="demoBar" role="note" hidden>範例資料模式：裡面都是虛構的資料，修改不會存下來。<button type="button" class="btn" id="leaveDemo" style="margin-left:8px">回到登入</button></div>
     <div class="status" id="adminBar" role="region" aria-label="管理者" hidden></div>
     <div class="alertbar" id="alertBar" role="region" aria-label="重要提醒" hidden></div>
-    <div class="pagehead"><h2 class="pagename" id="pageName">本月</h2><div id="headExtra"></div></div>
+    <div class="pagehead"><div class="ptitle"><h2 class="pagename" id="pageName">本月</h2><button type="button" class="btn qhelp" id="helpQ">？ 這頁怎麼用</button></div><div id="headExtra"></div></div>
     <main id="view"></main>
   </div>
 </div>
@@ -72,6 +73,7 @@
 <div class="toast" id="toast" hidden role="status"></div>
 <button type="button" class="update" id="updateBtn" hidden>有新版本，按這裡更新</button>
 <div class="printarea" id="printArea"></div>
+<input type="file" id="restoreFile" accept=".json,application/json" hidden>
 
 <!-- 新增發票（一般模式） -->
 <dialog id="dlgInv">

@@ -119,6 +119,15 @@ export async function createFirebaseStore({ year, ym }) {
       }
       return track(b.commit());
     },
+    // 備份用：抓這間公托的全部資料（不只畫面上載入的近期資料）
+    async fetchAll() {
+      const s = await F.getDoc(base()), out = { settings: s.exists() ? s.data() : null };
+      for (const c of COLS) {
+        const snap = await F.getDocs(col(c)), arr = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        out[c] = c === 'months' ? Object.fromEntries(arr.map(x => [x.id, x])) : arr;
+      }
+      return out;
+    },
     // 建立憑證：用交易確認編號沒被別台裝置用掉
     async createVoucher(v, invoiceIds) {
       if (!navigator.onLine) throw { code: 'offline' };
@@ -186,6 +195,7 @@ export function createDemoStore(sample) {
     update(c, id, patch) { updDoc(c, id, patch); return done(); },
     remove(c, id) { delDoc(c, id); return done(); },
     batch(ops) { for (const o of ops) { if (o.remove) delDoc(o.c, o.id); else if (o.update) updDoc(o.c, o.id, o.update); else setDoc(o.c, o.id, o.data, o.merge !== false); } return done(); },
+    async fetchAll() { const { loaded, ...rest } = structuredClone(state); return rest; },
     async createVoucher(v, invoiceIds) {
       if (find('vouchers', v.no)) throw { code: 'taken' };
       setDoc('vouchers', v.no, v, false);
