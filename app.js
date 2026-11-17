@@ -1,7 +1,7 @@
 import { createFirebaseStore, createDemoStore } from './data.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.17.5';
+const VERSION = '2026.11.17.6';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -646,7 +646,16 @@ function govSheet(f, t) {
 
 /* ===== 預覽（一頁一張、可滑動） ===== */
 const PV = { pages: [], i: 0, onPrint: null };
+// 列印用標楷體：電腦有內建標楷體就用；手機沒有，改用網路上的楷體（第一次預覽時才載入，不拖慢開啟）
+let kaiLoaded = false;
+function loadKai() {
+  if (kaiLoaded) return; kaiLoaded = true;
+  const l = document.createElement('link'); l.rel = 'stylesheet';
+  l.href = 'https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC&display=swap';
+  document.head.appendChild(l);
+}
 function openPreview(o) {
+  loadKai();
   PV.pages = o.pages; PV.onPrint = o.onPrint || null;
   $('#pTitle').textContent = o.title;
   $('#pTools').innerHTML = o.tools || ''; $('#pTools').hidden = !o.tools;
@@ -688,9 +697,10 @@ function pvGo(i, anim = true) {
   $('#dlgPrint').addEventListener('keydown', e => { if (e.key === 'ArrowLeft') pvGo(PV.i - 1); if (e.key === 'ArrowRight') pvGo(PV.i + 1) });
   addEventListener('resize', () => { if ($('#dlgPrint').open) { pvFit(); pvGo(PV.i, false) } });
 })();
-$('#pGo').onclick = () => {
+$('#pGo').onclick = async () => {
   if (!PV.pages.length) return toast('這一批沒有勾選要印的頁面。');
   $('#printArea').innerHTML = PV.pages.map(p => `<div class="a4">${p}</div>`).join('');
+  try { await Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 2000))]) } catch (e) { }   // 等字型載好再印
   window.print();
   if (PV.onPrint) PV.onPrint();
 };

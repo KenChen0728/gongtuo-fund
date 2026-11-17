@@ -21,7 +21,7 @@
   --gov:#A9C0D1; --gov-soft:#343F49;
   color-scheme:dark;
 }}
-:root{--nav-pad:max(6px,env(safe-area-inset-bottom,0px));--nav-h:calc(63px + var(--nav-pad));--side:232px}
+:root{--kai:"標楷體","DFKai-SB","BiauKaiTC","BiauKai","Kaiti TC","TW-Kai","LXGW WenKai TC",serif;--nav-pad:max(6px,env(safe-area-inset-bottom,0px));--nav-h:calc(63px + var(--nav-pad));--side:232px}
 
 *{box-sizing:border-box}
 [hidden]{display:none!important}
@@ -201,7 +201,7 @@ textarea{min-height:72px;resize:vertical}
 .a4strip{display:flex;width:100%;transition:transform .28s cubic-bezier(.2,.8,.2,1);will-change:transform}
 .a4slot{flex:0 0 100%;display:flex;justify-content:center;padding:12px 0}
 .a4box{width:calc(794px*var(--s));height:calc(1123px*var(--s));flex:none;box-shadow:0 1px 6px rgb(0 0 0/.25);background:#fff;overflow:hidden}
-.a4{width:794px;height:1123px;transform:scale(var(--s));transform-origin:0 0;padding:56px 60px;background:#fff;color:#000;font:16px/1.5 "PMingLiU","MingLiU","Noto Serif TC",serif;overflow:hidden}
+.a4{width:794px;height:1123px;transform:scale(var(--s));transform-origin:0 0;padding:56px 60px;background:#fff;color:#000;font:16px/1.5 var(--kai);overflow:hidden}
 @media (prefers-reduced-motion:reduce){.a4strip{transition:none!important}}
 .pnav{display:flex;align-items:center;gap:8px}
 .pnav .pos{flex:1;text-align:center;font-weight:700;font-variant-numeric:tabular-nums}
