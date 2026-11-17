@@ -331,3 +331,7 @@ input[type=date]{font:16px var(--font);padding:8px;border:1px solid var(--line);
 .annote{font-size:11px;margin:6px 0 0}
 .imptable{font-size:12px}.imptable td,.imptable th{padding:4px 6px;white-space:nowrap}
 @media print{.printarea *{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+.rdate{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:0 0 10px}
+.rdate label{flex-direction:row;font-weight:700;font-size:16px}
+.rdate input{width:auto;min-height:44px}
+.rdate .meta{flex-basis:100%;font-size:14px}

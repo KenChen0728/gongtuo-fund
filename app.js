@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.17.11';
+const VERSION = '2026.11.17.12';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -101,7 +101,32 @@ function chNum(n) {
   if (r) { if (w && r < 1000) s += '零'; s += four(r); }
   return s + '元整';
 }
-function receiptDate(y, m) { const dt = new Date(y + 1911, m - 1, 15); while (dt.getDay() === 0 || dt.getDay() === 6) dt.setDate(dt.getDate() + 1); return { y, m, d: dt.getDate() }; }
+// 收據日期：每月可以自己選；沒選就用設定的「每月幾號」（預設 15 號），遇週六、週日順延
+const isoOf = r => `${r.y + 1911}-${String(r.m).padStart(2, '0')}-${String(r.d).padStart(2, '0')}`;
+const fromISO = s => { const [Y, M, D] = String(s).split('-').map(Number); return Y && M && D ? { y: Y - 1911, m: M, d: D } : null; };
+function autoReceiptDate(y, m) {
+  const day = Math.max(1, Math.min(+N.rcptDay || 15, daysIn(y, m))), dt = new Date(y + 1911, m - 1, day);
+  while (dt.getDay() === 0 || dt.getDay() === 6) dt.setDate(dt.getDate() + 1);
+  return { y: dt.getFullYear() - 1911, m: dt.getMonth() + 1, d: dt.getDate() };
+}
+function receiptDate(y, m) { const r = fromISO(monthDoc(y, m).rcptDate || ''); return r ? { ...r, set: true } : autoReceiptDate(y, m); }
+const rocDate = r => `${r.y} 年 ${String(r.m).padStart(2, '0')} 月 ${String(r.d).padStart(2, '0')} 日`;
+// 請款收據：優化比（1、4、7、10 月，繳款人預設屏東縣政府）、契約價金（1、2、7、10 月，繳款人預設協會），也可以另開其他收據。
+// 和月費收據共用同一本號碼。存在每月資料的 xr（每張一個 key，刪除寫 null）
+const CNUM = ['', '一', '二', '三', '四'];
+const XR_TYPES = {
+  opt: { t: '優化比補助款', months: [1, 4, 7, 10], payer: () => N.payGov || '屏東縣政府', desc: (y, m) => `${y}年第${CNUM[[1, 4, 7, 10].indexOf(m) + 1] || ''}期優化比補助款` },
+  contract: { t: '契約價金', months: [1, 2, 7, 10], payer: () => N.payAssoc || '中華頭心手希望教育協會', desc: (y, m) => m === 1 ? `${y - 1}年第四期契約價金` : `${y}年第${({ 2: '一', 7: '二', 10: '三' })[m] || ''}期契約價金` },
+  other: { t: '其他收據', months: [], payer: () => '', desc: () => '' },
+};
+const monthXR = d => Object.entries(d.xr || {}).filter(([, r]) => r).map(([id, r]) => ({ ...r, id })).sort((a, b) => (a.at || 0) - (b.at || 0));
+// 預設金額：契約價金找去年同一期，其他找最近一張同類的
+function xrDefaultAmount(type, y, m) {
+  const all = Object.values(S().months).flatMap(d => monthXR(d).map(r => ({ ...r, y: d.y, m: d.m }))).filter(r => r.type === type && +r.amount);
+  if (type === 'contract') { const same = all.find(r => r.y === y - 1 && r.m === m); if (same) return same.amount; }
+  all.sort((a, b) => ymNum(b.y, b.m) - ymNum(a.y, a.m) || (b.at || 0) - (a.at || 0));
+  return all.length ? all[0].amount : '';
+}
 // 收據號碼每年從 001 重新開始。115 年以前沿用舊的單一設定（receiptNext、receiptSkip），之後每年分開記
 const RCPT_OLD_Y = 115;
 const rcptNext = y => { const v = (N.receiptNextY || {})[y]; return v != null ? +v || 1 : y <= RCPT_OLD_Y ? +N.receiptNext || 1 : 1; };
@@ -114,7 +139,7 @@ function receiptNos(y, m, kids) {
     let n = d.rcptStart; const skip = rcptSkip(y);
     for (const k of kids) { while (skip.includes(n)) n++; fixed[k.id] = n++; }
   }
-  const used = new Set(Object.values(fixed)), skip = new Set(rcptSkip(y));
+  const used = new Set([...Object.values(fixed), ...monthXR(d).map(r => r.no).filter(Boolean)]), skip = new Set(rcptSkip(y));
   let n = rcptNext(y);
   return kids.map(k => { if (fixed[k.id]) return fixed[k.id]; while (used.has(n) || skip.has(n)) n++; used.add(n); return n++; });
 }
@@ -383,6 +408,7 @@ function home() {
   if (unp.length) todo.push({ go: 'vou', t: `${unp.length} 張憑證還沒印`, m: `委辦費 ${unp.filter(isWB).length} 張用一般紙，其他 ${unp.filter(v => !isWB(v)).length} 張用色紙` });
   if (po.length) { const t = po.reduce((a, x) => a + amt(x), 0); todo.push({ go: 'cash', t: `零用金有 ${po.length} 張發票還沒結算`, m: `合計 ${fmt(t)} 元，餘額 ${fmt(N.petty - t)} 元` }); }
   if (activeKids().length && !monthDoc(CY, CM).rcptPrinted) { const r = receiptDate(CY, CM); todo.push({ go: 'fee', t: `本月收據還沒印（${activeKids().length} 位）`, m: `收據日期 ${r.m}/${r.d}` }); }
+  { const xl = monthXR(monthDoc(CY, CM)), due = Object.entries(XR_TYPES).filter(([k, T]) => T.months.includes(CM) && !xl.some(r => r.type === k && r.printed)).map(([, T]) => T.t); if (due.length) todo.push({ go: 'fee', t: `本月要開請款收據：${due.join('、')}`, m: '到「月費」頁下方的「請款收據」填寫並列印' }); }
   $('#view').innerHTML = `
   ${needSetup.length ? `<button type="button" class="card setupcard linkrow" data-go="set" style="text-align:left"><div class="title">第一次使用，請先完成設定</div><div class="meta">還沒填：${needSetup.map(esc).join('、')}</div></button>` : ''}
   <section><h2>要做的事<small>${todo.length} 件</small></h2>
@@ -438,9 +464,10 @@ function fee() {
   const total = kids.reduce((a, k) => a + kidCalc(k, fees[k.id], y, m).total, 0);
   $('#headExtra').innerHTML = monthNav('fee');
   $('#view').innerHTML = `
+  <div class="rdate"><label for="rDate">${m} 月收據日期</label><input type="date" id="rDate" value="${isoOf(rd)}" max="9999-12-31">${rd.set ? '<button type="button" class="btn" id="rDateReset">改回預設</button>' : ''}<span class="meta">收據上印「${rocDate(rd)}」。${rd.set ? '這是這個月自己選的日期。' : `預設每月 ${+N.rcptDay || 15} 號，遇週末順延，可以改成別天。`}</span></div>
   <div class="tally"><span>應收<b>${fmt(total)}</b></span><span>收據號碼<b style="font-size:18px">${kids.length ? rcptNo(Math.min(...nos)) + '–' + rcptNo(Math.max(...nos)) : '—'}</b></span><span class="${d.rcptPrinted ? '' : 'warn'}">收據<b style="font-size:18px">${d.rcptPrinted ? '已印' : '還沒印'}</b></span></div>
   <div class="actions start"><button type="button" class="btn primary" id="printRcptAll" ${kids.length ? '' : 'aria-disabled="true"'}>列印收據</button><button type="button" class="btn" id="addKid">＋ 新增幼兒</button><button type="button" class="btn" id="borrow">協會借用號碼</button></div>
-  <p class="hint">名單沿用上個月，月費和餐點費依上課天數和生日自動算。有延托、保險、退費的孩子，按「修改」再填。收據日期 ${rd.m}/${rd.d}。${d.rcptPrinted ? '印過的號碼不會再變；之後新增的孩子會用新的號碼。' : '收據號碼在列印時確定，印之前可能會變。'}</p>
+  <p class="hint">名單沿用上個月，月費和餐點費依上課天數和生日自動算。有延托、保險、退費的孩子，按「修改」再填。${d.rcptPrinted ? '印過的號碼不會再變；之後新增的孩子會用新的號碼。' : '收據號碼在列印時確定，印之前可能會變。'}</p>
   ${earlierUnprinted(y, m) ? `<p class="status">${earlierUnprinted(y, m)} 月的收據還沒印。先印這個月的話，${earlierUnprinted(y, m)} 月的號碼會排在這個月後面。</p>` : ''}
   ${kids.length ? `<div class="list">${kids.map((k, i) => {
     const f = fees[k.id] || {}, c = kidCalc(k, f, y, m), ex = [];
@@ -449,10 +476,58 @@ function fee() {
     if (+f.late) ex.push(`延托 ${fmt(f.late)}`); if (+f.ins) ex.push(`保險 ${fmt(f.ins)}`);
     return `<div class="row"><div class="main"><div class="title">${k.seat}. ${esc(k.name)}${k.active === false ? ' <span class="pill p-todo">已離開</span>' : ''}</div><div class="meta"><span>收據 ${rcptNo(nos[i])}</span>${ex.map(e => `<span>${e}</span>`).join('')}${+f.refund ? `<span class="when-bad">退費 ${fmt(f.refund)}</span>` : ''}</div></div><span class="amount">${fmt(c.total)}</span><button type="button" class="edit" data-kid="${k.id}">修改</button></div>`
   }).join('')}</div>` : `<div class="empty">${ymNum(y, m) >= CYM ? '還沒有幼兒名單。按「＋ 新增幼兒」，輸入座號、姓名和生日。' : '這個月沒有月費紀錄。'}</div>`}
+  ${xrSection(y, m, d)}
   <section><h2>備註<small>自動編號，列在月費表下方</small></h2>
    <div class="list">${monthNotes(d).map((n, i) => { const k = S().kids.find(x => x.id === n.kid); return `<div class="row"><div class="main"><div class="title">${i + 1}. ${esc(k ? k.name : '')} ${esc(n.text)}</div></div><button type="button" class="edit" data-delnote="${esc(n.key)}">刪除</button></div>` }).join('') || '<div class="row"><div class="main meta">還沒有備註。</div></div>'}</div>
   </section>
   ${rcptSkip(y).length ? `<p class="hint">${y} 年已標記協會借用：${rcptSkip(y).slice(-10).map(rcptNo).join('、')} 號，收據會跳過這些號碼。</p>` : ''}`;
+}
+// 請款收據區：這個月固定要開的（優化比、契約價金）先列出來，按「填寫」建立；另外可以加其他收據
+function xrSection(y, m, d) {
+  const list = monthXR(d), due = Object.entries(XR_TYPES).filter(([k, T]) => T.months.includes(m) && !list.some(r => r.type === k));
+  const rows = [
+    ...due.map(([k, T]) => `<div class="row"><div class="main"><div class="title">${T.t}收據</div><div class="meta"><span>繳款人 ${esc(T.payer())}</span><span class="when-warn">還沒填金額</span></div></div><button type="button" class="edit" data-xrnew="${k}">填寫</button></div>`),
+    ...list.map(r => `<div class="row"><div class="main"><div class="title">${esc(r.desc || XR_TYPES[r.type]?.t || '收據')}</div><div class="meta"><span>${r.no ? '收據 ' + rcptNo(r.no) : '號碼在列印時確定'}</span><span>繳款人 ${esc(r.payer)}</span>${r.printed ? '<span>已印</span>' : '<span class="when-warn">還沒印</span>'}</div></div><span class="amount">${fmt(r.amount)}</span><button type="button" class="edit" data-xr="${r.id}">修改</button><button type="button" class="edit" data-xrprint="${r.id}">列印</button></div>`),
+  ];
+  return `<section><h2>請款收據<small>1、4、7、10 月優化比；1、2、7、10 月契約價金</small></h2>
+   <div class="list">${rows.join('') || '<div class="row"><div class="main meta">這個月沒有固定要開的請款收據。</div></div>'}</div>
+   <div class="actions start"><button type="button" class="btn" data-xrnew="other">＋ 其他收據</button></div></section>`;
+}
+function openXR(y, m, type, id) {
+  const d = monthDoc(y, m), r = id ? (d.xr || {})[id] : null, T = XR_TYPES[r ? r.type : type] || XR_TYPES.other, rd = receiptDate(y, m);
+  const v = r || { type, payer: T.payer(), desc: T.desc(y, m), amount: xrDefaultAmount(type, y, m) };
+  ask(`${r ? '修改' : '新增'}${T.t}收據（${y} 年 ${m} 月）`, `
+   <label>繳款人<input type="text" id="xrPayer" value="${esc(v.payer)}"></label>
+   <label>摘要<input type="text" id="xrDesc" value="${esc(v.desc)}" placeholder="例如：${y}年第一期優化比補助款"></label>
+   <div class="two"><label>金額（元）<input type="number" id="xrAmt" inputmode="numeric" value="${esc(v.amount)}"></label><label>收據日期<input type="date" id="xrDate" value="${esc(v.date || isoOf(rd))}" max="9999-12-31"></label></div>
+   <p class="hint" style="font-size:14px">${r && r.no ? `收據號碼 ${rcptNo(r.no)}，重印也是同一號。` : '收據號碼和月費收據共用，按「列印」時才確定。'}${type === 'other' && !r ? '' : '繳款人的預設可以到「設定 → 收據」改。'}</p>
+   ${r ? `<div class="actions start"><button type="button" class="btn" data-xrdel="${id}">刪除這張收據</button></div>` : ''}`, () => {
+    const amount = +$('#xrAmt').value, payer = $('#xrPayer').value.trim(), desc = $('#xrDesc').value.trim(), date = $('#xrDate').value;
+    if (!payer || !desc) { toast('請填繳款人和摘要。'); return false }
+    if (!(amount > 0)) { toast('請填金額。'); return false }
+    const key = id || 'x' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const rec = { ...(r || {}), type: r ? r.type : type, payer, desc, amount, date: date && date !== isoOf(rd) ? date : '', at: r ? r.at || Date.now() : Date.now() };
+    store.set('months', ymKey(y, m), { y, m, xr: { [key]: rec } }).catch(fail());
+    toast(r ? '已儲存。' : `已新增，按「列印」就可以印。`);
+  }, '儲存');
+}
+function printXR(y, m, id) {
+  const d = monthDoc(y, m), r = (d.xr || {})[id]; if (!r) return;
+  let no = r.no;
+  if (!no) {          // 還沒印過：從「下一張收據」往後找沒用過、沒被協會借用的號碼
+    const used = new Set(), skip = new Set(rcptSkip(y));
+    for (const md of Object.values(S().months)) if (md.y === y) { Object.values(md.rcptNos || {}).forEach(n => used.add(n)); monthXR(md).forEach(x => x.no && used.add(x.no)); }
+    no = rcptNext(y); while (used.has(no) || skip.has(no)) no++;
+  }
+  const date = fromISO(r.date) || receiptDate(y, m);
+  openPreview({
+    title: `${r.desc}（收據 ${rcptNo(no)}）`, pages: [rcptPage({ no, y, date, payer: r.payer, desc: r.desc, total: +r.amount, third: '第三聯：繳款人留存聯' })], goText: '列印收據',
+    onPrint: () => {
+      store.set('months', ymKey(y, m), { y, m, xr: { [id]: { ...r, no, printed: true } } }).catch(fail());
+      if (no + 1 > rcptNext(y)) store.setSettings({ receiptNextY: { [y]: no + 1 } }).catch(fail());
+      toast(`收據 ${rcptNo(no)} 已印好。`);
+    }
+  });
 }
 // 月費備註：每則一個 key 分開存，兩台裝置同時新增不會互相蓋掉（舊資料的 notes 陣列照樣顯示）
 function monthNotes(d) {
@@ -586,9 +661,10 @@ function set() {
    <label>一行一位，順序就是薪資憑證的編號順序（第一位是 02）<textarea id="sStaff" style="min-height:160px">${esc((N.staff || []).join('\n'))}</textarea></label>
    <div class="actions start"><button type="button" class="btn primary" id="saveStaff">儲存員工名單</button></div>
   </details>
-  <details class="card pickbox"><summary>收據號碼</summary>
-   <label>${CY} 年下一張收據從幾號開始<input type="number" id="sRcpt" inputmode="numeric" value="${rcptNext(CY)}"></label>
-   <p class="hint" style="font-size:14px">印過某個月的收據後，系統會自動接下去。每年 1 月自動從 001 號重新開始。協會借用的號碼在「月費」頁標記。</p>
+  <details class="card pickbox"><summary>收據</summary>
+   <div class="two"><label>${CY} 年下一張收據從幾號開始<input type="number" id="sRcpt" inputmode="numeric" value="${rcptNext(CY)}"></label><label>收據日期預設每月幾號<input type="number" id="sRDay" inputmode="numeric" min="1" max="31" value="${+N.rcptDay || 15}"></label></div>
+   <p class="hint" style="font-size:14px">印過收據後，號碼會自動接下去，每年 1 月從 001 號重新開始。協會借用的號碼在「月費」頁標記。收據日期遇週六、週日順延，每個月也可以在「月費」頁最上面改。</p>
+   <div class="two"><label>優化比收據繳款人<input type="text" id="sPayGov" value="${esc(N.payGov || '屏東縣政府')}"></label><label>契約價金收據繳款人<input type="text" id="sPayAssoc" value="${esc(N.payAssoc || '中華頭心手希望教育協會')}"></label></div>
    <div class="actions start"><button type="button" class="btn primary" id="saveRcpt">儲存</button></div>
   </details>
   <details class="card pickbox" ${!+N.wbBizTotal ? 'open' : ''}><summary>委辦費預算（每年 1/1 依契約書輸入）</summary>
@@ -625,7 +701,7 @@ const HELP = [
   { id: 'print', t: '列印憑證', shot: 'print', steps: ['到「更多 → 憑證與列印」，按「列印憑證」。', '還沒印的會先勾好；要補印的，在「要印哪幾張」清單自己勾起來。', '先印第 1 批委辦費（一般紙），再印第 2 批其他經費來源（色紙），畫面會說要放幾張色紙。', '可以左右滑動或按「上一張／下一張」看每一張。'] },
   { id: 'cash', t: '零用金結算', shot: 'cash', steps: ['每月兩次，到「更多 → 零用金結算」。', '清單只列主任代墊的發票，照憑證編號排列，會計可以拿著憑證依序對帳。', '按「結算到今天」。還有發票沒做憑證、憑證沒印的，會先提醒你。', '結算過的清單在下方「已結算」，可以再列印。'] },
   { id: 'staff', t: '人事費', shot: 'staff', steps: ['薪資清冊做好後，到「更多 → 人事費」。', '每位員工填這個月的金額，經費來源預設委辦費-人事費。', '委辦人事費不夠時，按那位員工的「拆單」，填委辦費付多少，其餘自動改由營運收入支應。', '按「儲存本月人事費」。生日禮金、代班薪資、年終獎金在下方新增。'] },
-  { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。餐點費看孩子到當月 1 號滿幾個月：未滿 6 個月不收、未滿 1 歲 300 元、滿 1 歲 600 元。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變；每年 1 月從 001 號重新開始。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。'] },
+  { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。餐點費看孩子到當月 1 號滿幾個月：未滿 6 個月不收、未滿 1 歲 300 元、滿 1 歲 600 元。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變；每年 1 月從 001 號重新開始。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。', '收據日期在頁面最上面，預設每月 15 號（遇週末順延），每個月可以自己改；預設幾號在「設定 → 收據」改。', '頁面下方「請款收據」：1、4、7、10 月會出現優化比（繳款人預設屏東縣政府），1、2、7、10 月會出現契約價金（繳款人預設協會）。按「填寫」確認金額，再按「列印」。其他要開的收據按「＋ 其他收據」。'] },
   { id: 'report', t: '報表', shot: 'report', steps: ['「年度經費報表」照每月報表的格式，自動算每月收入、支出、損益，和委辦費、行管費用了幾 %。', '優化比、提升托育品質、縣府補助款到帳時，按「＋ 新增撥款收入」；補助款要選期別（第一期、第二期⋯），每一期各一列。', '按「列印（A4 橫式）」印一頁；按「匯出 Excel」下載和原本格式一樣的 Excel（標楷體、顏色、公式）。', '系統啟用前的月份，按「從 Excel 補登」選原本的經費明細檔，核對數字後按「補登」。要交縣府時按「產出核銷報表」。'] },
   { id: 'trash', t: '刪錯了怎麼辦', shot: 'trash', steps: ['刪除的發票、取消的憑證會在「更多 → 垃圾桶」放 30 天。', '按「救回」就回到原本的地方，任何一台裝置都能救。', '剛刪掉時，畫面下方的提示也有「復原」可以按。'] },
   { id: 'backup', t: '備份與還原', shot: 'backup', steps: ['建議每個月到「更多 → 設定 → 備份」按「下載備份」，存到電腦。', '萬一資料被改錯，按「從備份還原」，選那個備份檔。', '還原前會先自動下載一份目前的資料，還原錯了還能再還原回來。', '備份之後才新增的資料不會被刪掉。'] },
@@ -669,16 +745,19 @@ function foodSheet(y, m) {
   return `<h3>${y}年${m}月份食材費統計</h3><br><table><thead><tr><th>月</th><th>日</th><th>內容</th><th>總價</th></tr></thead><tbody>${f.map(x => `<tr><td>${x.m}</td><td>${x.d}</td><td>幼兒食材（${esc(x.food)}）</td><td style="text-align:right">${fmt(amt(x))}</td></tr>`).join('')}<tr><td colspan="3" style="text-align:right;font-weight:700">合計</td><td style="text-align:right;font-weight:700">${fmt(f.reduce((a, x) => a + amt(x), 0))}</td></tr></tbody></table>`;
 }
 function receiptPage(k, no, y, m) {
-  const f = (monthDoc(y, m).fees || {})[k.id] || {}, c = kidCalc(k, f, y, m), rd = receiptDate(y, m);
+  const f = (monthDoc(y, m).fees || {})[k.id] || {}, c = kidCalc(k, f, y, m);
   const parts = [`${y}年${m}月月費${c.fee}元`]; if (c.meal) parts.push(`${m}月餐點費${c.meal}元`);
   if (+f.late) parts.push(`延托費${f.late}元`); if (+f.ins) parts.push(`保險費${f.ins}元`); if (+f.refund) parts.push(`退費${Math.abs(f.refund)}元`);
+  return rcptPage({ no, y, date: receiptDate(y, m), payer: k.name, desc: parts.join('；'), total: c.total, third: '第三聯：家長留存聯' });
+}
+function rcptPage({ no, y, date, payer, desc, total, third }) {
   const one = lab => `<div style="display:flex"><div style="flex:1"><h3 style="font-size:18px">${esc(N.full)}</h3><h4 style="margin:2px 0 6px;font-size:16px">收據 RECEIPT</h4>
-   <div class="rhead"><span>日期：${rd.y} 年 ${String(rd.m).padStart(2, '0')} 月 ${String(rd.d).padStart(2, '0')} 日<br>統一編號：${esc(N.tax)}</span><span>（${y}）${esc(N.short)}收字第 <b>${rcptNo(no)}</b> 號</span></div>
+   <div class="rhead"><span>日期：${rocDate(date)}<br>統一編號：${esc(N.tax)}</span><span>（${y}）${esc(N.short)}收字第 <b>${rcptNo(no)}</b> 號</span></div>
    <table class="rbox"><thead><tr><th style="width:24%">繳款人 PAYER</th><th>摘要 DESCRIPTION</th><th style="width:20%">金額 AMOUNT</th></tr></thead>
-   <tbody><tr><td>${esc(k.name)}</td><td>${esc(parts.join('；'))}</td><td style="text-align:right">$${fmt(c.total)}</td></tr>
-   <tr><td colspan="3" style="height:auto">金額 AMOUNT　新臺幣 ${chNum(c.total)}</td></tr></tbody></table>
+   <tbody><tr><td>${esc(payer)}</td><td>${esc(desc)}</td><td style="text-align:right">$${fmt(total)}</td></tr>
+   <tr><td colspan="3" style="height:auto">金額 AMOUNT　新臺幣 ${chNum(total)}</td></tr></tbody></table>
    <div style="font-size:14px;margin-top:4px">經手人：</div></div><div class="side-note">${lab}</div></div>`;
-  return one('第一聯：協會留存聯') + '<div class="rcut"></div>' + one('第二聯：公托留存聯') + '<div class="rcut"></div>' + one('第三聯：家長留存聯');
+  return one('第一聯：協會留存聯') + '<div class="rcut"></div>' + one('第二聯：公托留存聯') + '<div class="rcut"></div>' + one(third);
 }
 // 金額寫法照範本：$1,234；負數 ($1,234)
 const money = v => v == null ? '' : v < 0 ? `<span class="neg">(${'$' + fmt(-v)})</span>` : '$' + fmt(v);
@@ -1279,6 +1358,15 @@ document.addEventListener('click', e => {
   if (t.dataset.batch) { VP.batch = +t.dataset.batch; return showVP() }
   if (t.dataset.jump !== undefined) return pvGo(+t.dataset.jump);
   if (t.dataset.kid) return openKid(t.dataset.kid);
+  if (t.dataset.xrnew) { const { y, m } = SEL_M.fee; return openXR(y, m, t.dataset.xrnew) }
+  if (t.dataset.xr) { const { y, m } = SEL_M.fee; return openXR(y, m, null, t.dataset.xr) }
+  if (t.dataset.xrprint) { const { y, m } = SEL_M.fee; return printXR(y, m, t.dataset.xrprint) }
+  if (t.dataset.xrdel) {
+    const { y, m } = SEL_M.fee, id = t.dataset.xrdel, r = (monthDoc(y, m).xr || {})[id]; $('#dlgAsk').close();
+    store.set('months', ymKey(y, m), { y, m, xr: { [id]: null } }).catch(fail());
+    return toast(r && r.no ? `已刪除收據 ${rcptNo(r.no)}。這個號碼不會再用到，紙本請註明作廢。` : '已刪除收據。', () => { store.set('months', ymKey(y, m), { y, m, xr: { [id]: r } }).catch(fail()); toast('已復原') });
+  }
+  if (t.id === 'rDateReset') { const { y, m } = SEL_M.fee; store.set('months', ymKey(y, m), { y, m, rcptDate: null }).catch(fail()); const r = autoReceiptDate(y, m); return toast(`${m} 月收據日期改回 ${r.m}/${r.d}。`) }
   if (t.dataset.printv) { const v = S().vouchers.find(x => x.no === t.dataset.printv); return openPreview({ title: `支出憑證 ${v.no}`, pages: [voucherSheet(v)], onPrint: () => store.update('vouchers', v.no, { printed: true, printedAt: TODAY }).catch(fail()) }) }
   if (t.dataset.cancelv) {
     const v = S().vouchers.find(x => x.no === t.dataset.cancelv);
@@ -1410,7 +1498,10 @@ document.addEventListener('click', e => {
       store.setSettings(p).catch(fail()); return toast('已儲存公托資料。');
     }
     case 'saveStaff': { const staff = $('#sStaff').value.split('\n').map(s => s.trim()).filter(Boolean); store.setSettings({ staff }).catch(fail()); return toast(`已儲存 ${staff.length} 位員工。`) }
-    case 'saveRcpt': { const n = +$('#sRcpt').value; if (!(n > 0)) return toast('請填號碼。'); store.setSettings({ receiptNextY: { [CY]: n } }).catch(fail()); return toast('已儲存。') }
+    case 'saveRcpt': {
+      const n = +$('#sRcpt').value, day = +$('#sRDay').value; if (!(n > 0)) return toast('請填號碼。'); if (!(day >= 1 && day <= 31)) return toast('收據日期請填 1 到 31。');
+      store.setSettings({ receiptNextY: { [CY]: n }, rcptDay: day, payGov: $('#sPayGov').value.trim() || '屏東縣政府', payAssoc: $('#sPayAssoc').value.trim() || '中華頭心手希望教育協會' }).catch(fail()); return toast('已儲存。')
+    }
     case 'saveBudget': {
       const budget = {}, usedBefore = {};
       wbItems().forEach((k, i) => { budget[k] = +document.querySelector(`[data-bud="${i}"]`).value || 0; usedBefore[k] = +document.querySelector(`[data-used="${i}"]`).value || 0 });
@@ -1425,6 +1516,12 @@ document.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'muSel') { store.setSettings({ manualUntil: { ...(N.manualUntil || {}), [CY]: +t.value } }).catch(fail()); return toast(+t.value ? `改成補登到 ${t.value} 月。` : '不使用補登的數字。') }
   if (t.id === 'inS') { $('#inPWrap').hidden = t.value !== '縣府補助款'; return }
+  if (t.id === 'rDate') {
+    const { y, m } = SEL_M.fee, r = fromISO(t.value), d = monthDoc(y, m);
+    if (!r) return toast('請選日期。');
+    store.set('months', ymKey(y, m), { y, m, rcptDate: t.value }).catch(fail());
+    return toast(`${m} 月收據日期改成 ${r.y}/${r.m}/${r.d}。${d.rcptPrinted ? '這個月的收據已經印過，要重印才會換成新日期。' : ''}`);
+  }
   if (t.id === 'inP') { $('#inPOther').hidden = t.value !== '__other'; return }
   if (t.dataset.vpick) { t.checked ? VP.chosen.add(t.dataset.vpick) : VP.chosen.delete(t.dataset.vpick); return showVP(true) }
 });
