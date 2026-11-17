@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.17.9';
+const VERSION = '2026.11.17.10';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -81,7 +81,8 @@ function monthKids(y, m) {
 }
 
 /* ===== 計算 ===== */
-const ageMonths = (birth, y, m) => { if (!birth) return 99; const [by, bm] = birth.split('-').map(Number); return (y + 1911) * 12 + m - (by * 12 + bm); };
+// 餐點費的月齡以每月 1 號為準：到 1 號已滿幾個月（1 號生日當天算滿）
+const ageMonths = (birth, y, m) => { if (!birth) return 99; const [by, bm, bd] = birth.split('-').map(Number); return (y + 1911) * 12 + m - (by * 12 + bm) - ((bd || 1) > 1 ? 1 : 0); };
 function kidCalc(k, f, y, m) {
   f = f || {};
   const am = ageMonths(k.birth, y, m), mealFull = am < 6 ? 0 : am < 12 ? 300 : 600;
@@ -619,7 +620,7 @@ const HELP = [
   { id: 'print', t: '列印憑證', shot: 'print', steps: ['到「更多 → 憑證與列印」，按「列印憑證」。', '還沒印的會先勾好；要補印的，在「要印哪幾張」清單自己勾起來。', '先印第 1 批委辦費（一般紙），再印第 2 批其他經費來源（色紙），畫面會說要放幾張色紙。', '可以左右滑動或按「上一張／下一張」看每一張。'] },
   { id: 'cash', t: '零用金結算', shot: 'cash', steps: ['每月兩次，到「更多 → 零用金結算」。', '清單只列主任代墊的發票，照憑證編號排列，會計可以拿著憑證依序對帳。', '按「結算到今天」。還有發票沒做憑證、憑證沒印的，會先提醒你。', '結算過的清單在下方「已結算」，可以再列印。'] },
   { id: 'staff', t: '人事費', shot: 'staff', steps: ['薪資清冊做好後，到「更多 → 人事費」。', '每位員工填這個月的金額，經費來源預設委辦費-人事費。', '委辦人事費不夠時，按那位員工的「拆單」，填委辦費付多少，其餘自動改由營運收入支應。', '按「儲存本月人事費」。生日禮金、代班薪資、年終獎金在下方新增。'] },
-  { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。'] },
+  { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。餐點費看孩子到當月 1 號滿幾個月：未滿 6 個月不收、未滿 1 歲 300 元、滿 1 歲 600 元。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。'] },
   { id: 'report', t: '報表', shot: 'report', steps: ['「年度經費報表」照每月報表的格式，自動算每月收入、支出、損益，和委辦費、行管費用了幾 %。', '優化比、提升托育品質、縣府補助款到帳時，按「＋ 新增撥款收入」；補助款要選期別（第一期、第二期⋯），每一期各一列。', '按「列印（A4 橫式）」印一頁；按「匯出 Excel」下載和原本格式一樣的 Excel（標楷體、顏色、公式）。', '系統啟用前的月份，按「從 Excel 補登」選原本的經費明細檔，核對數字後按「補登」。要交縣府時按「產出核銷報表」。'] },
   { id: 'trash', t: '刪錯了怎麼辦', shot: 'trash', steps: ['刪除的發票、取消的憑證會在「更多 → 垃圾桶」放 30 天。', '按「救回」就回到原本的地方，任何一台裝置都能救。', '剛刪掉時，畫面下方的提示也有「復原」可以按。'] },
   { id: 'backup', t: '備份與還原', shot: 'backup', steps: ['建議每個月到「更多 → 設定 → 備份」按「下載備份」，存到電腦。', '萬一資料被改錯，按「從備份還原」，選那個備份檔。', '還原前會先自動下載一份目前的資料，還原錯了還能再還原回來。', '備份之後才新增的資料不會被刪掉。'] },
@@ -1101,14 +1102,16 @@ function kidSync() {
   const f = kidFields(), c = kidCalc(k, f, y, m);
   $('#kCalc').textContent = `月費 ${fmt(c.fee)}＋餐點費 ${fmt(c.meal)}${+f.late ? `＋延托 ${fmt(f.late)}` : ''}${+f.ins ? `＋保險 ${fmt(f.ins)}` : ''}${+f.refund ? `－退費 ${fmt(-f.refund)}` : ''}`;
   $('#kTotal').textContent = fmt(c.total);
+  if (k.birth) $('#kInfo').textContent = mealInfo(c, y, m);
 }
+const mealInfo = (c, y, m) => `${y} 年 ${m} 月・到 ${m}/1 滿 ${Math.max(0, c.am)} 個月，${c.am < 6 ? '未滿 6 個月不收餐點費' : c.am < 12 ? '餐點費 300 元' : '餐點費 600 元'}`;
 function openKid(id) {
   const { y, m } = SEL_M.fee; kidId = id;
   const k = id ? S().kids.find(x => x.id === id) : null, f = id ? ((monthDoc(y, m).fees || {})[id] || {}) : {};
   const nextSeat = Math.max(0, ...activeKids().map(x => +x.seat || 0)) + 1;
   $('#kTitle').textContent = k ? `${k.seat}. ${k.name}` : '新增幼兒';
   const c = k ? kidCalc(k, f, y, m) : null;
-  $('#kInfo').textContent = k ? `${y} 年 ${m} 月・月齡 ${c.am} 個月，${c.am < 6 ? '未滿 6 個月不收餐點費' : c.am < 12 ? '餐點費 300 元' : '餐點費 600 元'}` : '填座號、姓名和生日，月費和餐點費會自動算。';
+  $('#kInfo').textContent = k ? mealInfo(c, y, m) : '填座號、姓名和生日，月費和餐點費會自動算。';
   $('#kBasic').open = !k;
   $('#kSeat').value = k ? k.seat : nextSeat; $('#kName').value = k ? k.name : ''; $('#kBirth').value = k ? k.birth || '' : '';
   $('#kDays').value = f.days ?? ''; $('#kLate').value = f.late ?? ''; $('#kIns').value = f.ins ?? ''; $('#kRefund').value = f.refund ?? ''; $('#kNote').value = '';
