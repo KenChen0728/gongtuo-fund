@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.17.8';
+const VERSION = '2026.11.17.9';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -39,7 +39,7 @@ const SETTINGS_REV = 2;
 // 01 號的項目：萬丹、育英、壽天是計畫督導津貼，公正是計畫主持費
 const catsWithFirst = first => first === '計畫督導津貼' ? DEFAULT_CATS : DEFAULT_CATS.map((g, i) => i ? g : { ...g, items: g.items.map(x => x === '計畫督導津貼' ? first : x) });
 NURSERIES.gongzheng.cats = catsWithFirst('計畫主持費');
-const DEFAULTS = { rev: SETTINGS_REV, firstItem: '計畫督導津貼', admBudget: 0, manualUntil: {}, director: '', reserved: 9, petty: 30000, supervisor: 5000, staff: [], wbPersonBudget: 0, wbPersonUsedBefore: 0, wbBizTotal: 0, budget: {}, usedBefore: {}, cats: DEFAULT_CATS, receiptNext: 1, receiptSkip: [], vendors: {} };
+const DEFAULTS = { rev: SETTINGS_REV, firstItem: '計畫督導津貼', pi: '', admBudget: 0, manualUntil: {}, director: '', reserved: 9, petty: 30000, supervisor: 5000, staff: [], wbPersonBudget: 0, wbPersonUsedBefore: 0, wbBizTotal: 0, budget: {}, usedBefore: {}, cats: DEFAULT_CATS, receiptNext: 1, receiptSkip: [], vendors: {} };
 const SRC_CLS = { '委辦費-業務費': 'wb', '委辦費-人事費': 'wb', '委辦費-行管費': 'adm', '營運收入支應-業務費': 'op', '營運收入支應-人事費': 'op', '營運收入支應-年終獎金': 'op', '營運收入支應-餐點費': 'food', '營運收入支應-兒童團體保險': 'ins', '提升托育品質-業務費': 'q', '提升托育品質-人事費': 'q' };
 const COMMON = ['幼兒食材', '教學活動及節慶活動用品', '日常消耗用品', '行政文書辦公', '員工福利', '玩具書籍'];
 const INCOME_SRC = ['優化比', '提升托育品質', '縣府補助款', '其他'];
@@ -87,7 +87,7 @@ function kidCalc(k, f, y, m) {
   const am = ageMonths(k.birth, y, m), mealFull = am < 6 ? 0 : am < 12 ? 300 : 600;
   const days = f.days === '' || f.days == null ? null : +f.days;
   const fee = days == null ? 12000 : days * 400;
-  const meal = mealFull === 0 ? 0 : (days == null ? mealFull : days * 20);
+  const meal = mealFull === 0 ? 0 : (days == null ? mealFull : days * (mealFull / 30));   // 600 元一天 20，300 元一天 10
   return { fee, meal, am, total: fee + meal + (+f.late || 0) + (+f.ins || 0) + (+f.refund || 0) };
 }
 const feeTotal = (y, m) => { const d = monthDoc(y, m); return monthKids(y, m).reduce((a, k) => a + kidCalc(k, (d.fees || {})[k.id], y, m).total, 0); };
@@ -369,6 +369,7 @@ function home() {
   const todo = [];
   const needSetup = [];
   if (!N.director) needSetup.push('主任姓名');
+  if (!N.pi) needSetup.push('計畫主持人');
   if (!(N.staff || []).length) needSetup.push('員工名單');
   if (!+N.wbBizTotal) needSetup.push('委辦費預算');
   if (!activeKids().length) needSetup.push('幼兒名單（在「月費」新增）');
@@ -536,7 +537,7 @@ function staff() {
   ${!(N.staff || []).length ? '<div class="empty">還沒有員工名單，請先到「設定 → 員工名單」填寫。</div>' : `
   <p class="hint">薪資清冊另外製作，這裡只輸入金額，改完按「儲存本月人事費」。編號前面都是 ${pre(y, m)}。${saved ? '' : '<b>這個月還沒儲存。</b>'}</p>
   <div class="list paylist">
-   <div class="row"><div class="main"><div class="title"><span class="amount">01</span>　${esc(N.director || '主任')}</div><div class="meta">${esc(N.firstItem)}・${pill('委辦費-業務費')}</div></div>
+   <div class="row"><div class="main"><div class="title"><span class="amount">01</span>　${esc(N.pi || '（請到設定填計畫主持人）')}</div><div class="meta">${esc(N.firstItem)}・${pill('委辦費-業務費')}</div></div>
     <label class="payamt">金額<input type="number" inputmode="numeric" id="supAmt" value="${d.supervisor ?? N.supervisor}"></label></div>
    ${rows.map((r, i) => `<div class="row"><div class="main"><div class="title"><span class="amount">${String(i + 2).padStart(2, '0')}</span>　${esc(r.name)}</div>
     <select data-psrc="${i}" aria-label="${esc(r.name)} 經費來源"><option ${r.src === '委辦費-人事費' ? 'selected' : ''}>委辦費-人事費</option><option ${r.src === '營運收入支應-人事費' ? 'selected' : ''}>營運收入支應-人事費</option></select></div>
@@ -571,7 +572,8 @@ function set() {
    <label>全名（收據抬頭）<input type="text" id="sFull" value="${esc(N.full)}"></label>
    <div class="two"><label>統一編號<input type="text" id="sTax" inputmode="numeric" value="${esc(N.tax)}"></label><label>目前主任（預設代墊人）<input type="text" id="sDir" value="${esc(N.director)}"></label></div>
    <div class="two"><label>保留給人事的編號<input type="number" id="sRes" inputmode="numeric" value="${N.reserved}"></label><label>每月代墊金（元）<input type="number" id="sPetty" inputmode="numeric" value="${N.petty}"></label></div>
-   <div class="two"><label>01 號：${esc(N.firstItem)}（每月）<input type="number" id="sSup" inputmode="numeric" value="${N.supervisor}"></label><label>粘存單抬頭（辦理協會）<input type="text" id="sAssoc" value="${esc(N.assoc)}"></label></div>
+   <div class="two"><label>計畫主持人（01 號受款人）<input type="text" id="sPI" value="${esc(N.pi || '')}"></label><label>01 號：${esc(N.firstItem)}（每月）<input type="number" id="sSup" inputmode="numeric" value="${N.supervisor}"></label></div>
+   <label>粘存單抬頭（辦理協會）<input type="text" id="sAssoc" value="${esc(N.assoc)}"></label>
    <div class="actions start"><button type="button" class="btn primary" id="saveBasic">儲存公托資料</button></div>
   </details>
   <details class="card pickbox" ${!(N.staff || []).length ? 'open' : ''}><summary>員工名單（${(N.staff || []).length} 位）</summary>
@@ -611,7 +613,7 @@ function set() {
 }
 // 使用說明：每個主題一張真實畫面＋步驟；各頁右上「？這頁怎麼用」直接跳到對應主題
 const HELP = [
-  { id: 'start', t: '第一次使用', shot: 'set', steps: ['到「更多 → 設定」，打開「公托資料」，填主任姓名，按「儲存公托資料」。', '打開「員工名單」，一行一位，順序就是薪資憑證的編號（第一位是 02）。', '打開「委辦費預算」，依契約書填人事費、業務費總額和各細項。', '到「月費」按「＋ 新增幼兒」，輸入座號、姓名和生日。'] },
+  { id: 'start', t: '第一次使用', shot: 'set', steps: ['到「更多 → 設定」，打開「公托資料」，填主任姓名和計畫主持人（01 號受款人），按「儲存公托資料」。', '打開「員工名單」，一行一位，順序就是薪資憑證的編號（第一位是 02）。', '打開「委辦費預算」，依契約書填人事費、業務費總額和各細項。', '到「月費」按「＋ 新增幼兒」，輸入座號、姓名和生日。'] },
   { id: 'add', t: '輸入發票', shot: 'dlginv', steps: ['拿到發票就按「＋ 新增發票」。', '代墊人預設是主任；付給廠商的選「付給廠商」並填廠商名稱。', '年、月已帶好，選日期、類別，填品名、數量和單價。經費來源會依類別自動帶出。', '不習慣一個畫面填很多欄位，可以在「本月」或「設定」改成一步一步模式。'] },
   { id: 'merge', t: '合併成憑證', shot: 'merge', steps: ['到「發票」，勾選同一類別、同一個付款對象的發票。', '按下方「合併成憑證」，編號、受款人、經費來源、用途說明、金額都會自動帶入。', '需要時可以改用途說明，或加一行備註（會印在簽章欄下方）。', '建立憑證需要網路，避免兩台裝置用到同一個編號。'] },
   { id: 'print', t: '列印憑證', shot: 'print', steps: ['到「更多 → 憑證與列印」，按「列印憑證」。', '還沒印的會先勾好；要補印的，在「要印哪幾張」清單自己勾起來。', '先印第 1 批委辦費（一般紙），再印第 2 批其他經費來源（色紙），畫面會說要放幾張色紙。', '可以左右滑動或按「上一張／下一張」看每一張。'] },
@@ -1395,7 +1397,7 @@ document.addEventListener('click', e => {
     case 'restore': return $('#restoreFile').click();
     case 'logout': return ask(DEMO ? '離開範例資料' : '登出這台裝置', `<p class="hint">${DEMO ? '範例資料不會保留。' : '登出後要重新輸入序號才能進入。資料都存在雲端，不會不見。'}</p>`, () => { if (DEMO) leaveDemo(); else store.logout().then(() => location.reload()) }, DEMO ? '離開' : '登出', 'btn danger');
     case 'saveBasic': {
-      const p = { short: $('#sShort').value.trim(), code: $('#sCode').value.trim(), full: $('#sFull').value.trim(), tax: $('#sTax').value.trim(), director: $('#sDir').value.trim(), reserved: +$('#sRes').value || 9, petty: +$('#sPetty').value || 0, supervisor: +$('#sSup').value || 0, assoc: $('#sAssoc').value.trim() };
+      const p = { short: $('#sShort').value.trim(), code: $('#sCode').value.trim(), full: $('#sFull').value.trim(), tax: $('#sTax').value.trim(), director: $('#sDir').value.trim(), pi: $('#sPI').value.trim(), reserved: +$('#sRes').value || 9, petty: +$('#sPetty').value || 0, supervisor: +$('#sSup').value || 0, assoc: $('#sAssoc').value.trim() };
       if (!p.code || !p.short) return toast('簡稱和憑證代字不能空白。');
       store.setSettings(p).catch(fail()); return toast('已儲存公托資料。');
     }

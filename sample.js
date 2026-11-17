@@ -53,7 +53,7 @@ export function sampleData({ CY, CM }) {
   };
   const BUDGET = { '影印機': 6977, '愛托付系統': 6000, '飲水機': 23380, '保全': 22000, '計畫督導津貼': 60000, '通訊網路費': 15717, '電費': 84587, '場地費': 30000, '保險': 15883, '消防申報': 5000, '外聘督導費': 12000, '104系統': 6856, '日常消耗用品': 75539, '行政文書辦公': 21890, '環境維護消毒': 7650, '冷氣清洗': 10290, '維修': 51185, '電腦維修及採購': 6500, '購置設備': 68606 };
   const USED = { '影印機': 5820, '愛托付系統': 6000, '飲水機': 19200, '保全': 20167, '計畫督導津貼': 45000, '通訊網路費': 14060, '電費': 71240, '場地費': 30000, '保險': 15883, '消防申報': 5000, '外聘督導費': 8000, '104系統': 4820, '日常消耗用品': 56717, '行政文書辦公': 16420, '環境維護消毒': 5600, '冷氣清洗': 0, '維修': 32800, '電腦維修及採購': 3570, '購置設備': 41200 };
-  const settings = { short: '萬丹', code: '萬', full: '屏東縣萬丹鄉公設民營托嬰中心', tax: '00451325', assoc: '中華頭心手希望教育協會', director: '林雅婷', reserved: 9, petty: 30000, supervisor: 5000, staff, wbPersonBudget: 2250000, wbPersonUsedBefore: 1600000, wbBizTotal: 530060, budget: BUDGET, usedBefore: USED, receiptNext: 248, receiptSkip: [], vendors: {} };
+  const settings = { short: '萬丹', code: '萬', full: '屏東縣萬丹鄉公設民營托嬰中心', tax: '00451325', assoc: '中華頭心手希望教育協會', director: '林雅婷', pi: '吳志明', reserved: 9, petty: 30000, supervisor: 5000, staff, wbPersonBudget: 2250000, wbPersonUsedBefore: 1600000, wbBizTotal: 530060, budget: BUDGET, usedBefore: USED, receiptNext: 248, receiptSkip: [], vendors: {} };
   const incomes = [{ id: 'n1', y: CY, m: 3, ym: CY * 100 + 3, source: '縣府補助款', amount: 1220000, note: '第一期補助款' }, { id: 'n2', y: CY, m: 8, ym: CY * 100 + 8, source: '縣府補助款', amount: 920000, note: '第二期補助款' }, { id: 'n3', y: CY, m: 10, ym: CY * 100 + 10, source: '提升托育品質', amount: 100000, note: '' }];
   return { settings, invoices, vouchers, settlements, kids, months, incomes };
 }
