@@ -340,3 +340,9 @@ input[type=date]{font:16px var(--font);padding:8px;border:1px solid var(--line);
 .ancus th:first-child{text-align:left;white-space:nowrap}
 .fpdate{flex-direction:row;align-items:center;gap:8px;font-weight:700}
 .fpdate input{width:auto;min-height:44px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;min-height:44px;padding:0 0 0 12px;border:1px solid var(--line);border-radius:22px;background:var(--surface);font-size:15px}
+.chip:not(:has(.chipx)){padding-right:12px}
+.chipx{min-width:44px;min-height:44px;border:0;background:none;color:var(--muted);font-size:16px;border-radius:22px;cursor:pointer}
+@media (hover:hover){.chipx:hover{color:var(--bad)}}
+.chips{margin-bottom:10px}

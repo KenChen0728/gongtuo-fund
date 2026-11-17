@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.17.14';
+const VERSION = '2026.11.17.15';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -23,9 +23,9 @@ const daysIn = (y, m) => new Date(y + 1911, m, 0).getDate();
 /* ===== 固定資料 ===== */
 const NURSERIES = {
   wandan: { short: '萬丹', code: '萬', full: '屏東縣萬丹鄉公設民營托嬰中心', tax: '00451325', assoc: '中華頭心手希望教育協會' },
-  yuying: { short: '育英', code: '育', full: '屏東縣內埔鄉育英公設民營托嬰中心', tax: '00451697', assoc: '中華頭心手希望教育協會', firstItem: '計畫主持費' },
-  gongzheng: { short: '公正', code: '公', full: '屏東縣屏東市公正公設民營托嬰中心', tax: '94574090', assoc: '中華頭心手希望教育協會', reserved: 11, firstItem: '計畫主持費' },
-  shoutian: { short: '壽天', code: '壽', full: '高雄市岡山區壽天公共托嬰中心', tax: '61189590', assoc: '中華頭心手希望教育協會', firstItem: '計畫主持費' },
+  yuying: { short: '育英', code: '育', full: '屏東縣內埔鄉育英公設民營托嬰中心', tax: '00451697', assoc: '中華頭心手希望教育協會' },
+  gongzheng: { short: '公正', code: '公', full: '屏東縣屏東市公正公設民營托嬰中心', tax: '94574090', assoc: '中華頭心手希望教育協會', reserved: 11 },
+  shoutian: { short: '壽天', code: '壽', full: '高雄市岡山區壽天公共托嬰中心', tax: '61189590', assoc: '中華頭心手希望教育協會' },
 };
 const DEFAULT_CATS = [
   { src: '委辦費-業務費', items: ['影印機', '愛托付系統', '飲水機', '保全', '計畫督導津貼', '通訊網路費', '電費', '場地費', '保險', '消防申報', '外聘督導費', '104系統', '日常消耗用品', '行政文書辦公', '環境維護消毒', '冷氣清洗', '維修', '電腦維修及採購', '購置設備'] },
@@ -35,11 +35,10 @@ const DEFAULT_CATS = [
   { src: '提升托育品質-業務費', items: ['提升托育品質'] },
   { src: '委辦費-行管費', items: ['行政管理費'] },
 ];
-const SETTINGS_REV = 3;
-// 委辦費-業務費的細項：上面那串是萬丹的；其他三間預設只有這 6 項，其他自己加（01 號是計畫主持費）
-const OTHER_WB = ['影印機', '網路通訊費', '愛托付', '保險', '計畫主持費', '104系統'];
+const SETTINGS_REV = 4;
+// 委辦費-業務費的細項：上面那串是萬丹的；其他三間預設只有這 6 項，不用的可以在設定刪除、再加自己的。01 號四間都是計畫督導津貼
+const OTHER_WB = ['影印機', '網路通訊費', '愛托付', '保險', '計畫督導津貼', '104系統'];
 const OTHER_CATS = DEFAULT_CATS.map((g, i) => i ? g : { ...g, items: [...OTHER_WB] });
-const OLD_WB = [DEFAULT_CATS[0].items, DEFAULT_CATS[0].items.map(x => x === '計畫督導津貼' ? '計畫主持費' : x)];
 for (const n of ['yuying', 'gongzheng', 'shoutian']) NURSERIES[n].cats = OTHER_CATS;
 const DEFAULTS = { rev: SETTINGS_REV, firstItem: '計畫督導津貼', pi: '', admBudget: 0, manualUntil: {}, director: '', reserved: 9, petty: 30000, supervisor: 5000, staff: [], wbPersonBudget: 0, wbPersonUsedBefore: 0, wbBizTotal: 0, budget: {}, usedBefore: {}, cats: DEFAULT_CATS, receiptNext: 1, receiptSkip: [], vendors: {} };
 // 經費來源：內建的有顏色和報表位置；各公托自己加的（例如開辦費）列在年度報表下方的「其他經費來源」
@@ -339,23 +338,22 @@ function onData() {
 }
 // 改版時補上新的預設：只改還是舊預設值的欄位，自己改過的不動
 function upgradeSettings(cur, nid = NID) {
-  const NID = nid, p = { rev: SETTINGS_REV };
-  if (NID === 'gongzheng') {
-    if ((cur.reserved ?? 9) === 9) p.reserved = 11;
-    if (!cur.firstItem) p.firstItem = '計畫主持費';
-    if (Array.isArray(cur.cats) && cur.cats[0] && cur.cats[0].items.includes('計畫督導津貼') && !cur.cats[0].items.includes('計畫主持費'))
-      p.cats = cur.cats.map((g, i) => i ? g : { ...g, items: g.items.map(x => x === '計畫督導津貼' ? '計畫主持費' : x) });
-  }
+  const NID = nid, p = { rev: SETTINGS_REV }, F = '計畫督導津貼', OLDF = '計畫主持費';
+  if (NID === 'gongzheng' && (cur.reserved ?? 9) === 9) p.reserved = 11;
   if (NID === 'shoutian' && cur.assoc === '高雄市岡山區壽天公共托嬰中心') p.assoc = '中華頭心手希望教育協會';
+  // rev 4：01 號四間都叫計畫督導津貼。之前改成計畫主持費的改回來（類別、預算、已用金額一起）
+  let cs = Array.isArray(cur.cats) ? cur.cats : null;
+  const ren = o => (o && o[OLDF] != null && o[F] == null) ? (r => { r[F] = o[OLDF]; delete r[OLDF]; return r })({ ...o }) : null;
+  if (cur.firstItem === OLDF) p.firstItem = F;
+  if (cs && cs.some(g => g.items.includes(OLDF))) { cs = cs.map(g => ({ ...g, items: g.items.map(x => x === OLDF ? F : x).filter((x, i, a) => a.indexOf(x) === i) })); p.cats = cs }
+  const b = ren(cur.budget), u = ren(cur.usedBefore); if (b) p.budget = b; if (u) p.usedBefore = u;
   // rev 3：萬丹以外的委辦業務費細項改成 6 項。還是舊預設（沒改過）的才換；已經填了預算或已用金額的細項保留
   if (NID !== 'wandan' && (cur.rev || 1) < 3) {
-    const cs = p.cats || cur.cats, g0 = Array.isArray(cs) && cs.find(g => g.src === '委辦費-業務費');
-    const same = (a, b) => a.length === b.length && a.every(x => b.includes(x));
-    const rename = o => { if (!o || o['計畫督導津貼'] == null || o['計畫主持費'] != null) return o; const r = { ...o, 計畫主持費: o['計畫督導津貼'] }; delete r['計畫督導津貼']; return r };
-    if (!cur.firstItem || cur.firstItem === '計畫督導津貼') { p.firstItem = '計畫主持費'; if (cur.budget) p.budget = rename(cur.budget); if (cur.usedBefore) p.usedBefore = rename(cur.usedBefore); }
-    if (g0 && OLD_WB.some(o => same(g0.items, o))) {
-      const b = p.budget || cur.budget || {}, u = p.usedBefore || cur.usedBefore || {};
-      const keep = g0.items.filter(x => !OTHER_WB.includes(x) && (+b[x] || +u[x]));
+    const g0 = cs && cs.find(g => g.src === '委辦費-業務費');
+    const same = (a, c) => a.length === c.length && a.every(x => c.includes(x));
+    if (g0 && same(g0.items, DEFAULT_CATS[0].items)) {
+      const bb = b || cur.budget || {}, uu = u || cur.usedBefore || {};
+      const keep = g0.items.filter(x => !OTHER_WB.includes(x) && (+bb[x] || +uu[x]));
       p.cats = cs.map(g => g === g0 ? { ...g, items: [...OTHER_WB, ...keep] } : g);
     }
   }
@@ -735,7 +733,8 @@ function set() {
    <div class="actions start"><button type="button" class="btn primary" id="saveBudget">儲存預算</button></div>
   </details>
   <details class="card pickbox"><summary>類別清單（選了類別，經費來源就自動帶出）</summary>
-   ${cats().map(g => `<div><div class="meta" style="margin:0 0 4px">${pill(g.src)}</div><div>${g.items.map(esc).join('、')}</div></div>`).join('')}
+   <p class="hint" style="font-size:14px">委辦費-業務費用不到的項目按 ✕ 刪除，再用下方「＋ 新增類別」加自己的名稱；01 號（${esc(N.firstItem)}）和系統用到的項目不能刪。刪除不影響已經記過的發票和憑證。</p>
+   ${cats().map(g => `<div><div class="meta" style="margin:0 0 4px">${pill(g.src)}</div><div class="chips">${g.items.map(x => `<span class="chip">${esc(x)}${!canDelCat(g.src, x) ? '' : `<button type="button" class="chipx" data-delsrc="${esc(g.src)}" data-delcat="${esc(x)}" aria-label="刪除 ${esc(x)}">✕</button>`}</span>`).join('')}</div></div>`).join('')}
    <div class="two"><label>新類別名稱<input type="text" id="sNewCat"></label><label>經費來源<select id="sNewSrc">${allSrcs().map(s => `<option>${esc(s)}</option>`).join('')}<option value="__new">＋ 新的經費來源…</option></select></label></div>
    <label id="sNewSrcWrap" hidden>新的經費來源名稱<input type="text" id="sNewSrcName" placeholder="例如：開辦費"></label>
    <p class="hint" style="font-size:14px">要記別的經費（例如開辦費），選「＋ 新的經費來源」，再填這筆經費底下的第一個類別。自己加的經費來源會列在年度經費報表下方，不算進每月損益。</p>
@@ -1108,6 +1107,21 @@ function addCategory(name, src) {
   if (g) { if (g.items.includes(name)) return; g.items.push(name) } else cs.push({ src, items: [name] });
   store.setSettings({ cats: cs }).catch(fail());
 }
+// 可以刪的：委辦費-業務費的細項（01 號除外）、自己加的經費來源和類別。餐點、團保、行管費這些系統用到的不給刪
+const SYS_ITEMS = new Set(DEFAULT_CATS.slice(1).flatMap(g => g.items));
+const canDelCat = (src, x) => x !== N.firstItem && (src === '委辦費-業務費' || isCustomSrc(src) || !SYS_ITEMS.has(x));
+// 刪除類別：只從選單拿掉，已經記過的發票、憑證照舊。01 號的項目不能刪（人事費頁要用）
+function delCategory(src, name, btn) {
+  const used = S().invoices.filter(x => !x.deleted && x.cat === name).length, bud = +(N.budget || {})[name] || 0;
+  const warn = [used ? `已經有 ${used} 張發票用這個項目，舊的發票不受影響，但之後新增發票選不到。` : '', bud ? `這個項目有填預算 ${fmt(bud)} 元，刪除後預算加總會少這一筆，請記得到「委辦費預算」重新分配。` : ''].filter(Boolean).join('');
+  ask('你確定要刪除此經費來源嗎？', `<p class="hint">要刪除「${esc(name)}」（${esc(src)}）。${warn}</p><p class="hint">刪錯了可以按提示上的「復原」，或再用「＋ 新增類別」加回來。</p>`, () => {
+    const before = structuredClone(cats());
+    const cs = before.map(g => g.src === src ? { ...g, items: g.items.filter(x => x !== name) } : g).filter(g => g.items.length || !isCustomSrc(g.src));
+    store.setSettings({ cats: cs }).catch(fail());
+    if (dirty && btn) btn.closest('.chip')?.remove();          // 設定頁有沒存的修改時畫面不會重畫，先自己拿掉
+    toast(`已刪除「${name}」。`, () => { store.setSettings({ cats: before }).catch(fail()); toast('已復原') });
+  }, '刪除', 'btn primary');
+}
 function saveInvoice(data, id) {
   const doc = { ...data, ym: ymNum(data.y, data.m) };
   if (id) return store.update('invoices', id, doc).catch(fail());
@@ -1459,6 +1473,7 @@ document.addEventListener('click', e => {
   if (t.id === 'fpAll') { const { y, m } = SEL_M.fee; monthKids(y, m).forEach(k => FP.add('k:' + k.id)); return fpSync() }
   if (t.id === 'fpCancel') { FP = null; FPD = ''; return render() }
   if (t.id === 'fpApply') return t.getAttribute('aria-disabled') === 'true' ? toast('請先勾選收據。') : fpApply();
+  if (t.dataset.delcat) return delCategory(t.dataset.delsrc, t.dataset.delcat, t);
   if (t.dataset.xrnew) { const { y, m } = SEL_M.fee; return openXR(y, m, t.dataset.xrnew) }
   if (t.dataset.xr) { const { y, m } = SEL_M.fee; return openXR(y, m, null, t.dataset.xr) }
   if (t.dataset.xrprint) { const { y, m } = SEL_M.fee; return printXR(y, m, t.dataset.xrprint) }
