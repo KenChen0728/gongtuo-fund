@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.18.1';
+const VERSION = '2026.11.18.2';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -457,15 +457,39 @@ function rowInv(x, withTick) {
    <div class="meta">${payer}${pill(x.src)}<span>${x.y !== CY ? x.y + '/' : ''}${x.m}/${x.d}</span>${x.qty > 1 ? `<span>${x.qty} × ${fmt(x.price)}</span>` : ''}${x.voucher ? `<span class="pill p-done">${esc(x.voucher)}</span>` : ''}${x.settled && !x.voucher ? '<span class="pill p-todo">已結算</span>' : ''}</div></div>
    <span class="amount">${fmt(amt(x))}</span>${!locked ? `<button type="button" class="edit" data-edit="${x.id}">修改</button>` : ''}</div>`;
 }
+/* 還沒做憑證的發票：照「類別＋付款對象＋經費來源」分組，一組就是可以合成一張憑證的發票 */
+function invGroups(list) {
+  const order = new Map(); cats().forEach(g => g.items.forEach(i => order.has(i) || order.set(i, order.size)));
+  const m = new Map();
+  for (const x of list) { const k = [x.cat, x.payer, x.src].join('\u0001'); if (!m.has(k)) m.set(k, []); m.get(k).push(x) }
+  const first = g => g[0].ym * 100 + g[0].d;
+  return [...m.values()].map(g => g.sort((a, b) => a.ym - b.ym || a.d - b.d)).sort((a, b) =>
+    (order.get(a[0].cat) ?? 1e6) - (order.get(b[0].cat) ?? 1e6) || a[0].cat.localeCompare(b[0].cat) ||
+    (a[0].payer === '主任' ? 0 : 1) - (b[0].payer === '主任' ? 0 : 1) || first(a) - first(b));
+}
+const grpAll = ids => ids.every(id => sel.has(id));
+function syncGrpBtns() { document.querySelectorAll('[data-selgrp]').forEach(b => { const on = grpAll(b.dataset.selgrp.split(',')); b.textContent = on ? '取消這組' : '全選這組'; b.setAttribute('aria-pressed', on) }) }
+function grpInv(g) {
+  const x0 = g[0], ids = g.map(x => x.id), payer = x0.payer === '主任' ? '<span class="pill p-dir">主任代墊</span>' : `<span class="pill p-vendor">${esc(x0.payer)}</span>`;
+  const on = grpAll(ids);
+  return `<div class="list grp"><div class="grph"><div class="main"><div class="title">${esc(x0.cat)}</div><div class="meta">${payer}${pill(x0.src)}<span>${g.length} 張・共 <b class="amount">${fmt(g.reduce((a, x) => a + amt(x), 0))}</b> 元</span></div></div>
+   ${g.length > 1 ? `<button type="button" class="edit" data-selgrp="${ids.join(',')}" aria-pressed="${on}">${on ? '取消這組' : '全選這組'}</button>` : ''}</div>
+   ${g.map(x => {
+    const what = x.cat === '幼兒食材' ? (x.food || x.desc || '幼兒食材') : x.desc;
+    return `<div class="row"><button type="button" class="tick" role="checkbox" aria-checked="${sel.has(x.id)}" data-sel="${x.id}" aria-label="選取 ${esc(what)}"><i>✓</i>選取</button>
+     <div class="main"><div class="title">${esc(what)}</div><div class="meta"><span>${x.y !== CY ? x.y + '/' : ''}${x.m}/${x.d}</span>${x.qty > 1 ? `<span>${x.qty} × ${fmt(x.price)}</span>` : ''}${x.settled ? '<span class="pill p-todo">已結算</span>' : ''}</div></div>
+     <span class="amount">${fmt(amt(x))}</span>${!x.settled ? `<button type="button" class="edit" data-edit="${x.id}">修改</button>` : ''}</div>`;
+  }).join('')}</div>`;
+}
 function invView() {
   const flt = x => invFilter === 'all' || (invFilter === 'dir' ? x.payer === '主任' : x.payer !== '主任');
   const open = openInv().filter(flt).sort((a, b) => a.ym - b.ym || a.d - b.d);
   const done = invoices().filter(x => x.voucher && x.ym >= ymNum(shiftYM(CY, CM, -1).y, shiftYM(CY, CM, -1).m)).filter(flt).sort((a, b) => b.voucher.localeCompare(a.voucher));
   $('#headExtra').innerHTML = `<div class="chips" role="group" aria-label="篩選">${[['all', '全部'], ['dir', '主任代墊'], ['ven', '付給廠商']].map(([k, t]) => `<button type="button" class="chip" aria-pressed="${invFilter === k}" data-filter="${k}">${t}</button>`).join('')}</div>`;
   $('#view').innerHTML = `
-  <p class="hint">勾選同一類別的發票，按下方「合併成憑證」，編號、受款人、用途說明和金額都會自動帶入。</p>
+  <p class="hint">同一組的發票可以合成一張憑證：按「全選這組」或自己勾選，再按下方「合併成憑證」，編號、受款人、用途說明和金額都會自動帶入。</p>
   <section><h2>還沒做憑證<small>${open.length} 張</small></h2>
-   ${open.length ? `<div class="list">${open.map(x => rowInv(x, true)).join('')}</div>` : `<div class="empty">${S().loaded.invoices ? '目前沒有還沒做憑證的發票。按「＋ 新增發票」開始記帳。' : '正在載入發票…'}</div>`}</section>
+   ${open.length ? invGroups(open).map(grpInv).join('') : `<div class="empty">${S().loaded.invoices ? '目前沒有還沒做憑證的發票。按「＋ 新增發票」開始記帳。' : '正在載入發票…'}</div>`}</section>
   <section><h2>最近已做憑證<small>上個月起 ${done.length} 張；已做憑證或已結算的不能修改</small></h2>
    ${done.length ? `<div class="list">${done.map(x => rowInv(x)).join('')}</div>` : '<div class="empty">還沒有。</div>'}</section>`;
 }
@@ -759,7 +783,7 @@ function set() {
 const HELP = [
   { id: 'start', t: '第一次使用', shot: 'set', steps: ['到「更多 → 設定」，打開「公托資料」，填主任姓名和計畫主持人（01 號受款人），按「儲存公托資料」。', '打開「員工名單」，一行一位，順序就是薪資憑證的編號（第一位是 02）。', '打開「委辦費預算」，依契約書填人事費、業務費總額和各細項。', '到「月費」按「＋ 新增幼兒」，輸入座號、姓名和生日。'] },
   { id: 'add', t: '輸入發票', shot: 'dlginv', steps: ['拿到發票就按「＋ 新增發票」。', '代墊人預設是主任；付給廠商的選「付給廠商」並填廠商名稱。', '年、月已帶好，選日期、類別，填品名、數量和單價。經費來源會依類別自動帶出。', '不習慣一個畫面填很多欄位，可以在「本月」或「設定」改成一步一步模式。'] },
-  { id: 'merge', t: '合併成憑證', shot: 'merge', steps: ['到「發票」，勾選同一類別、同一個付款對象的發票。', '按下方「合併成憑證」，編號、受款人、經費來源、用途說明、金額都會自動帶入。', '需要時可以改用途說明，或加一行備註（會印在簽章欄下方）。', '建立憑證需要網路，避免兩台裝置用到同一個編號。'] },
+  { id: 'merge', t: '合併成憑證', shot: 'merge', steps: ['到「發票」，還沒做憑證的發票會照「類別＋付款對象」分組，同一組就能合成一張憑證。', '按組名右邊的「全選這組」，或自己勾選要合併的幾張。', '按下方「合併成憑證」，編號、受款人、經費來源、用途說明、金額都會自動帶入。', '需要時可以改用途說明，或加一行備註（會印在簽章欄下方）。', '建立憑證需要網路，避免兩台裝置用到同一個編號。'] },
   { id: 'print', t: '列印憑證', shot: 'print', steps: ['到「更多 → 憑證與列印」，按「列印憑證」。', '還沒印的會先勾好；要補印的，在「要印哪幾張」清單自己勾起來。', '先印第 1 批委辦費（一般紙），再印第 2 批其他經費來源（色紙），畫面會說要放幾張色紙。', '可以左右滑動或按「上一張／下一張」看每一張。'] },
   { id: 'cash', t: '零用金結算', shot: 'cash', steps: ['每月兩次，到「更多 → 零用金結算」。', '清單只列主任代墊的發票，照憑證編號排列，會計可以拿著憑證依序對帳。', '按「結算到今天」。還有發票沒做憑證、憑證沒印的，會先提醒你。', '結算過的清單在下方「已結算」，可以再列印。'] },
   { id: 'staff', t: '人事費', shot: 'staff', steps: ['薪資清冊做好後，到「更多 → 人事費」。', '每位員工填這個月的金額，經費來源預設委辦費-人事費。', '委辦人事費不夠時，按那位員工的「拆單」，填委辦費付多少，其餘自動改由營運收入支應。', '按「儲存本月人事費」。生日禮金、代班薪資、年終獎金在下方新增。'] },
@@ -1463,7 +1487,8 @@ document.addEventListener('click', e => {
   if (t.dataset.mode) { MODE = t.dataset.mode; ls.set('gongtuo.mode', MODE); render(); return toast(MODE === 'step' ? '已改成一步一步模式（只有這台裝置）。' : '已改成一般模式（只有這台裝置）。') }
   if (t.dataset.mnav && dirty && view === 'staff') return leaveGuard(() => t.click());
   if (t.dataset.mnav) { FP = null; const s = SEL_M[t.dataset.mnav], d = +t.dataset.d; const r = d === 0 ? { y: CY, m: CM } : shiftYM(s.y, s.m, d); s.y = r.y; s.m = r.m; dirty = false; return render() }
-  if (t.dataset.sel) { const id = t.dataset.sel; sel.has(id) ? sel.delete(id) : sel.add(id); t.setAttribute('aria-checked', sel.has(id)); return updateMerge() }
+  if (t.dataset.sel) { const id = t.dataset.sel; sel.has(id) ? sel.delete(id) : sel.add(id); t.setAttribute('aria-checked', sel.has(id)); syncGrpBtns(); return updateMerge() }
+  if (t.dataset.selgrp) { const ids = t.dataset.selgrp.split(','); if (grpAll(ids)) ids.forEach(id => sel.delete(id)); else { sel.clear(); ids.forEach(id => sel.add(id)) } document.querySelectorAll('[data-sel]').forEach(b => b.setAttribute('aria-checked', sel.has(b.dataset.sel))); syncGrpBtns(); return updateMerge() }
   if (t.dataset.edit) { editId = t.dataset.edit; vendorsList(); fillInvForm(S().invoices.find(x => x.id === editId)); return $('#dlgInv').showModal() }
   if (t.dataset.filter) { invFilter = t.dataset.filter; sel.clear(); return render() }
   if (t.dataset.cash) { cashTab = t.dataset.cash; return render() }

@@ -34,8 +34,11 @@ async def main():
         await pg.evaluate("document.querySelector('#sDir').closest('details').open=true; document.querySelector('#sDir').closest('details').scrollIntoView({block:'start'})")
         await shot('set')
         await go('home'); await pg.click('#add'); await shot('dlginv'); await pg.keyboard.press('Escape')
-        await go('inv'); await pg.click('[data-sel="i12"]'); await pg.click('[data-sel="i13"]')
-        await pg.evaluate("document.querySelector('[data-sel=\"i12\"]').scrollIntoView({block:'center'})"); await shot('merge')
+        await go('inv'); await pg.evaluate("document.querySelector('[data-sel=\"i12\"]').closest('.grp').scrollIntoView({block:'start'}); scrollBy(0,-70)")
+        b12 = await pg.evaluate("!!document.querySelector('[data-sel=\"i12\"]').closest('.grp').querySelector('[data-selgrp]')")
+        if b12: await pg.evaluate("document.querySelector('[data-sel=\"i12\"]').closest('.grp').querySelector('[data-selgrp]').click()")
+        else: await pg.click('[data-sel="i12"]')
+        await shot('merge')
         await pg.click('#selMerge'); await pg.click('#mGo'); await pg.wait_for_timeout(300)   # 建一張還沒印的憑證，列印畫面才有內容
         await go('vou'); await pg.click('#printV'); await shot('print'); await pg.keyboard.press('Escape')
         for v in ['cash', 'staff', 'fee', 'report', 'trash']:

@@ -346,3 +346,10 @@ input[type=date]{font:16px var(--font);padding:8px;border:1px solid var(--line);
 .chipx{min-width:44px;min-height:44px;border:0;background:none;color:var(--muted);font-size:16px;border-radius:22px;cursor:pointer}
 @media (hover:hover){.chipx:hover{color:var(--bad)}}
 .chips{margin-bottom:10px}
+/* 發票分組 */
+.list.grp+.list.grp{margin-top:4px}
+.grph{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 12px;background:color-mix(in srgb,var(--line) 45%,var(--surface));border-bottom:1px solid var(--line)}
+.grph>.main{flex:1 1 180px}
+.grph .title{font-weight:700;font-size:17px}
+.grph>.edit{margin-left:auto}
+.grph+.row{border-top:0}
