@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.18.4';
+const VERSION = '2026.11.18.5';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -661,7 +661,7 @@ function vou() {
     <div class="row"><div class="main"><div class="title"><span class="amount">${pre(y, m)}01</span>　${esc(N.firstItem)}</div><div class="meta">${pill('委辦費-業務費')}</div></div><span class="amount">${fmt(d.supervisor ?? N.supervisor)}</span></div>
     ${pay.map((r, i) => `<div class="row"><div class="main"><div class="title"><span class="amount">${pre(y, m)}${String(i + 2).padStart(2, '0')}</span>　${esc(r.name)} ${y}年${m}月薪資</div><div class="meta">${pill(r.src)}</div></div><span class="amount">${fmt(r.amount)}</span></div>`).join('')}</div></details>` : ''}
   ${list.length ? `<div class="list">${list.map(v => `<div class="row"><div class="main"><div class="title"><span class="amount">${esc(v.no)}</span>　${esc(v.desc)}</div>
-    <div class="meta">${pill(v.src)}<span>受款人：${esc(v.payee)}</span>${v.kind === 'inv' ? `${v.printed ? `<span class="pill p-done">已印 ${esc(v.printedAt)}</span>` : '<span class="pill p-todo">還沒印</span>'}<span>${isWB(v) ? '一般紙' : '色紙'}</span>` : '<span>另外製作</span>'}${v.note ? '<span>有備註</span>' : ''}</div></div>
+    <div class="meta">${pill(v.src)}<span>受款人：${esc(v.kind === 'inv' ? payeeLabel(v) : v.payee)}</span>${v.kind === 'inv' ? `${v.printed ? `<span class="pill p-done">已印 ${esc(v.printedAt)}</span>` : '<span class="pill p-todo">還沒印</span>'}<span>${isWB(v) ? '一般紙' : '色紙'}</span>` : '<span>另外製作</span>'}${v.note ? '<span>有備註</span>' : ''}</div></div>
     <span class="amount">${fmt(v.amount)}</span>${v.kind === 'inv' ? `<button type="button" class="edit" data-printv="${esc(v.no)}">列印</button>` : ''}<button type="button" class="edit" data-cancelv="${esc(v.no)}">取消</button></div>`).join('')}</div>` : '<div class="empty">這個月還沒有憑證。到「發票」勾選發票，就能合併成憑證。</div>'}`;
 }
 function cash() {
@@ -807,10 +807,13 @@ function help() {
 }
 
 /* ===== 紙本內容 ===== */
+// 受款人：主任代墊（自己公托的人）前面加「X公托」；廠商照名稱；已經寫「X公托 姓名」的照寫的
+const payeeOwn = v => v.own ?? (v.kind === 'inv' && (v.payee === N.director || (v.ids || []).some(id => S().invoices.find(x => x.id === id)?.payer === '主任')));
+const payeeLabel = v => !v.payee || /公托/.test(v.payee) || !payeeOwn(v) ? v.payee || '' : `${N.short}公托 ${v.payee}`;
 function voucherSheet(v) {
   const s = String(Math.round(v.amount)).padStart(6, ' ').split('');
   return `<h3>${esc(N.assoc)}</h3><h4>支出憑證粘存單</h4>
-  <div style="margin:0 0 6px">受款人：${esc(N.short)}公托 ${esc(v.payee)}</div>
+  <div style="margin:0 0 6px">受款人：${esc(payeeLabel(v))}</div>
   <table><thead><tr><th rowspan="2">憑證編號</th><th rowspan="2">經費來源</th><th rowspan="2">用途說明</th><th colspan="6">金額</th></tr>
   <tr>${['十萬', '萬', '千', '百', '十', '元'].map(t => `<th class="dig">${t}</th>`).join('')}</tr></thead>
   <tbody><tr><td style="white-space:nowrap">${esc(v.no)}</td><td style="white-space:nowrap">${esc(v.src)}</td><td>${esc(N.short)}公托-${esc(v.desc)}</td>${s.map(c => `<td class="dig">${c.trim()}</td>`).join('')}</tr></tbody></table>
@@ -1250,7 +1253,7 @@ const autoDesc = list => { const cat = list[0].cat; if (cat === '幼兒食材') 
 function openMerge() {
   const list = [...sel].map(id => S().invoices.find(x => x.id === id)).filter(Boolean).sort((a, b) => a.ym - b.ym || a.d - b.d);
   $('#mNo').textContent = nextNo();
-  $('#mPayee').textContent = list[0].payer === '主任' ? (N.director || '主任') + '（主任代墊）' : list[0].payer;
+  $('#mPayee').textContent = list[0].payer === '主任' ? `${N.short}公托 ${N.director || '主任'}（主任代墊）` : list[0].payer;
   $('#mSrc').innerHTML = pill(list[0].src);
   $('#mDesc').value = autoDesc(list); $('#mNote').value = '';
   $('#mCount').textContent = list.length; $('#mAmt').textContent = fmt(list.reduce((a, x) => a + amt(x), 0));
@@ -1259,7 +1262,7 @@ function openMerge() {
 async function createInvVoucher(list, desc, note) {
   for (let tries = 0; tries < 3; tries++) {
     const f = list[0], no = nextNo();
-    const v = { no, y: CY, m: CM, ym: CYM, payee: f.payer === '主任' ? (N.director || '主任') : f.payer, src: f.src, desc, note: note || '', amount: list.reduce((a, x) => a + amt(x), 0), ids: list.map(x => x.id), kind: 'inv', cat: f.cat, printed: false, printedAt: '', deleted: false, createdAt: Date.now() };
+    const v = { no, y: CY, m: CM, ym: CYM, payee: f.payer === '主任' ? (N.director || '主任') : f.payer, own: f.payer === '主任', src: f.src, desc, note: note || '', amount: list.reduce((a, x) => a + amt(x), 0), ids: list.map(x => x.id), kind: 'inv', cat: f.cat, printed: false, printedAt: '', deleted: false, createdAt: Date.now() };
     try { await store.createVoucher(v, v.ids); return v; }
     catch (e) { if (e.code !== 'taken') throw e; await new Promise(r => setTimeout(r, 600)); }
   }
