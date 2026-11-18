@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.18.6';
+const VERSION = '2026.11.18.7';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -807,8 +807,9 @@ function help() {
 }
 
 /* ===== 紙本內容 ===== */
-// 受款人：自己公托的人（主任代墊、員工名單上的老師、計畫主持人）前面加「X公托」；廠商照名稱；已經寫「X公托 姓名」的照寫的
-const ownName = n => !!n && [N.director, N.pi, ...(N.staff || [])].some(x => x && x.trim() === n.trim());
+// 受款人：自己公托的人（主任代墊、員工名單上的老師）前面加「X公托」；計畫主持人和廠商照名稱；已經寫「X公托 姓名」的照寫的
+const isPI = n => !!n && !!N.pi && N.pi.trim() === n.trim();
+const ownName = n => !!n && !isPI(n) && [N.director, ...(N.staff || [])].some(x => x && x.trim() === n.trim());
 const payeeOwn = v => !!v.own || ownName(v.payee) || (v.kind === 'inv' && (v.ids || []).some(id => S().invoices.find(x => x.id === id)?.payer === '主任'));
 const nurseryPrefix = (n, own) => !n || /公托/.test(n) || !own ? n || '' : `${N.short}公托 ${n}`;
 const payeeLabel = v => nurseryPrefix(v.payee, payeeOwn(v));
