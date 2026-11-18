@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.17.15';
+const VERSION = '2026.11.18.1';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -53,6 +53,8 @@ let N = { ...DEFAULTS };                 // 目前公托的設定（含預設）
 function refreshN() { N = { ...DEFAULTS, ...(NURSERIES[NID] || {}), ...(S().settings || {}) }; if (!N.cats || !N.cats.length) N.cats = DEFAULT_CATS; }
 const cats = () => N.cats;
 const wbItems = () => (cats().find(g => g.src === '委辦費-業務費') || DEFAULT_CATS[0]).items;
+let invKeep = null;
+const invSrc = cat => invKeep && cat === invKeep.cat && invKeep.src ? invKeep.src : srcOf(cat);
 const srcOf = cat => { for (const g of cats()) if (g.items.includes(cat)) return g.src; return '營運收入支應-業務費'; };
 const pill = src => `<span class="pill p-${SRC_CLS[src] || 'cus'}">${esc(src)}</span>`;
 const isCustomSrc = src => !!src && !(src in SRC_CLS);
@@ -733,8 +735,8 @@ function set() {
    <div class="actions start"><button type="button" class="btn primary" id="saveBudget">儲存預算</button></div>
   </details>
   <details class="card pickbox"><summary>類別清單（選了類別，經費來源就自動帶出）</summary>
-   <p class="hint" style="font-size:14px">委辦費-業務費用不到的項目按 ✕ 刪除，再用下方「＋ 新增類別」加自己的名稱；01 號（${esc(N.firstItem)}）和系統用到的項目不能刪。刪除不影響已經記過的發票和憑證。</p>
-   ${cats().map(g => `<div><div class="meta" style="margin:0 0 4px">${pill(g.src)}</div><div class="chips">${g.items.map(x => `<span class="chip">${esc(x)}${!canDelCat(g.src, x) ? '' : `<button type="button" class="chipx" data-delsrc="${esc(g.src)}" data-delcat="${esc(x)}" aria-label="刪除 ${esc(x)}">✕</button>`}</span>`).join('')}</div></div>`).join('')}
+   <p class="hint" style="font-size:14px">用不到的項目按 ✕ 刪除，再用下方「＋ 新增類別」加自己的名稱；只有 01 號（${esc(N.firstItem)}）不能刪。刪除不影響已經記過的發票和憑證。</p>
+   ${cats().map(g => `<div><div class="meta" style="margin:0 0 4px">${pill(g.src)}</div><div class="chips">${g.items.length ? '' : '<span class="hint" style="font-size:14px">已經沒有項目，要用時再從下方新增。</span>'}${g.items.map(x => `<span class="chip">${esc(x)}${!canDelCat(g.src, x) ? '' : `<button type="button" class="chipx" data-delsrc="${esc(g.src)}" data-delcat="${esc(x)}" aria-label="刪除 ${esc(x)}">✕</button>`}</span>`).join('')}</div></div>`).join('')}
    <div class="two"><label>新類別名稱<input type="text" id="sNewCat"></label><label>經費來源<select id="sNewSrc">${allSrcs().map(s => `<option>${esc(s)}</option>`).join('')}<option value="__new">＋ 新的經費來源…</option></select></label></div>
    <label id="sNewSrcWrap" hidden>新的經費來源名稱<input type="text" id="sNewSrcName" placeholder="例如：開辦費"></label>
    <p class="hint" style="font-size:14px">要記別的經費（例如開辦費），選「＋ 新的經費來源」，再填這筆經費底下的第一個類別。自己加的經費來源會列在年度經費報表下方，不算進每月損益。</p>
@@ -1079,7 +1081,8 @@ function fillInvForm(x) {
   y.innerHTML = [CY - 1, CY].map(v => `<option value="${v}">民國 ${v} 年</option>`).join('');
   m.innerHTML = Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}">${i + 1} 月</option>`).join('');
   d.innerHTML = '<option value="">選日期</option>' + Array.from({ length: 31 }, (_, i) => `<option value="${i + 1}">${i + 1} 日</option>`).join('');
-  c.innerHTML = '<option value="">請選類別</option>' + cats().map(g => `<optgroup label="${esc(g.src)}">${g.items.map(i => `<option>${esc(i)}</option>`).join('')}</optgroup>`).join('') + '<option value="__other">其他（自己新增）</option>';
+  invKeep = x && !cats().some(g => g.items.includes(x.cat)) ? { cat: x.cat, src: x.src } : null;   // 項目已從清單刪掉的舊發票：保留原本的類別和經費來源
+  c.innerHTML = '<option value="">請選類別</option>' + cats().filter(g => g.items.length).map(g => `<optgroup label="${esc(g.src)}">${g.items.map(i => `<option>${esc(i)}</option>`).join('')}</optgroup>`).join('') + (invKeep ? `<option value="${esc(invKeep.cat)}">${esc(invKeep.cat)}（已刪除的項目）</option>` : '') + '<option value="__other">其他（自己新增）</option>';
   $('#iOtherSrc').innerHTML = allSrcs().map(s => `<option>${esc(s)}</option>`).join('');
   $('#iPayer').options[0].textContent = `主任代墊（${N.director || '主任'}）`;
   $('#iPayer').value = x ? (x.payer === '主任' ? '主任' : '廠商') : '主任';
@@ -1094,7 +1097,7 @@ function syncInv() {
   $('#iVendorWrap').hidden = $('#iPayer').value !== '廠商';
   const cat = $('#iCat').value, other = cat === '__other';
   $('#iOtherWrap').hidden = !other;
-  const src = other ? $('#iOtherSrc').value : (cat ? srcOf(cat) : '');
+  const src = other ? $('#iOtherSrc').value : (cat ? invSrc(cat) : '');
   $('#iSrc').innerHTML = src ? pill(src) : '選了類別會自動帶出';
   $('#iFoodWrap').hidden = cat !== '幼兒食材';
   if (cat === '幼兒食材' && !$('#iDesc').value) $('#iDesc').value = '幼兒食材';
@@ -1108,8 +1111,7 @@ function addCategory(name, src) {
   store.setSettings({ cats: cs }).catch(fail());
 }
 // 可以刪的：委辦費-業務費的細項（01 號除外）、自己加的經費來源和類別。餐點、團保、行管費這些系統用到的不給刪
-const SYS_ITEMS = new Set(DEFAULT_CATS.slice(1).flatMap(g => g.items));
-const canDelCat = (src, x) => x !== N.firstItem && (src === '委辦費-業務費' || isCustomSrc(src) || !SYS_ITEMS.has(x));
+const canDelCat = (src, x) => x !== N.firstItem;
 // 刪除類別：只從選單拿掉，已經記過的發票、憑證照舊。01 號的項目不能刪（人事費頁要用）
 function delCategory(src, name, btn) {
   const used = S().invoices.filter(x => !x.deleted && x.cat === name).length, bud = +(N.budget || {})[name] || 0;
@@ -1137,7 +1139,7 @@ $('#fInv').addEventListener('submit', e => {
   else if (cat === '__other' && !$('#iOtherName').value.trim()) msg = '請填新類別名稱。'; else if (!desc) msg = '請填內容。'; else if (!(price > 0)) msg = '單價要大於 0。';
   if (msg) { e.preventDefault(); toast(msg); return }
   let src;
-  if (cat === '__other') { cat = $('#iOtherName').value.trim(); src = $('#iOtherSrc').value; addCategory(cat, src) } else src = srcOf(cat);
+  if (cat === '__other') { cat = $('#iOtherName').value.trim(); src = $('#iOtherSrc').value; addCategory(cat, src) } else src = invSrc(cat);
   saveInvoice({ y, m, d, payer, cat, src, desc, qty: +$('#iQty').value || 1, price, food: cat === '幼兒食材' ? $('#iFood').value.trim() : '' }, editId);
   toast(editId ? '已儲存' : payer === '主任' ? '已儲存，也列進零用金清單了。' : '已儲存。');
 });
@@ -1177,7 +1179,7 @@ function wizRender() {
       b = `<h2>發票上的日期是哪一天？</h2><div class="srcline" style="font-size:17px">民國 ${W.y} 年 <select id="wM" style="width:auto;font-size:17px" aria-label="月份">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${W.m === i + 1 ? 'selected' : ''}>${i + 1} 月</option>`).join('')}</select>　點一下日期</div>
       <div class="daygrid">${Array.from({ length: dim }, (_, i) => `<button type="button" data-wiz="day" data-v="${i + 1}" aria-pressed="${W.d === i + 1}">${i + 1}</button>`).join('')}</div>`; break;
     }
-    case 'cat': b = `<h2>買的是哪一類？</h2><div style="display:flex;flex-direction:column;gap:6px"><div class="title">常用</div><div class="catgrid">${COMMON.map(i => `<button type="button" data-wiz="cat" data-v="${esc(i)}" aria-pressed="${W.cat === i}">${esc(i)}</button>`).join('')}</div></div><p class="hint" style="font-size:15px">找不到的話，往下看全部類別。</p>${cats().map(g => `<div style="display:flex;flex-direction:column;gap:6px"><div>${pill(g.src)}</div><div class="catgrid">${g.items.map(i => `<button type="button" data-wiz="cat" data-v="${esc(i)}" aria-pressed="${W.cat === i}">${esc(i)}</button>`).join('')}</div></div>`).join('')}
+    case 'cat': b = `<h2>買的是哪一類？</h2><div style="display:flex;flex-direction:column;gap:6px"><div class="title">常用</div><div class="catgrid">${COMMON.filter(i => cats().some(g => g.items.includes(i))).map(i => `<button type="button" data-wiz="cat" data-v="${esc(i)}" aria-pressed="${W.cat === i}">${esc(i)}</button>`).join('')}</div></div><p class="hint" style="font-size:15px">找不到的話，往下看全部類別。</p>${cats().filter(g => g.items.length).map(g => `<div style="display:flex;flex-direction:column;gap:6px"><div>${pill(g.src)}</div><div class="catgrid">${g.items.map(i => `<button type="button" data-wiz="cat" data-v="${esc(i)}" aria-pressed="${W.cat === i}">${esc(i)}</button>`).join('')}</div></div>`).join('')}
       <div class="catgrid"><button type="button" data-wiz="cat" data-v="__other" aria-pressed="${W.other}">其他（自己新增）</button></div>
       ${W.other ? `<label>新類別名稱<input type="text" id="wOther" value="${esc(W.otherName)}" ${inv_}></label><label>經費來源<select id="wOtherSrc">${Object.keys(SRC_CLS).map(s => `<option ${s === W.otherSrc ? 'selected' : ''}>${s}</option>`).join('')}</select></label>${err}${next}` : ''}`; break;
     case 'what': b = W.cat === '幼兒食材'
@@ -1669,5 +1671,5 @@ document.addEventListener('click', e => { const b = e.target.closest('button'); 
 const _render = render;
 render = function () { if (dirty && (view === 'set' || view === 'staff')) return; _render(); };
 
-window.__app = { go, get store() { return store }, upgrade: upgradeSettings };   // 自動測試用
+window.__app = { go, get store() { return store }, upgrade: upgradeSettings, fillInv: fillInvForm, openWiz };   // 自動測試用
 boot();
