@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.18.9';
+const VERSION = '2026.11.18.10';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -174,29 +174,50 @@ const AN_GROUPS = [
 const AN_WB = [['wbHR', '人事'], ['wbBiz', '業務']];
 const SRC_KEY = { '營運收入支應-人事費': 'opHR', '營運收入支應-業務費': 'opBiz', '營運收入支應-年終獎金': 'opBonus', '營運收入支應-餐點費': 'opMeal', '營運收入支應-兒童團體保險': 'opIns', '提升托育品質-人事費': 'qHR', '提升托育品質-業務費': 'qBiz', '委辦費-人事費': 'wbHR', '委辦費-業務費': 'wbBiz', '委辦費-行管費': 'adm' };
 const emptyMonth = () => ({ fee: 0, opt: 0, q: 0, other: 0, sub: {}, cus: {}, opHR: 0, opBiz: 0, opBonus: 0, opMeal: 0, opIns: 0, qHR: 0, qBiz: 0, wbHR: 0, wbBiz: 0, adm: 0 });
-function sysMonth(y, m) {
-  const r = emptyMonth(); r.fee = feeTotal(y, m);
-  for (const x of S().incomes) if (x.y === y && x.m === m) {
+const incomesOf = (y, m) => S().incomes.filter(x => x.y === y && x.m === m);
+function addIncomes(r, list) {
+  for (const x of list) {
     const a = +x.amount || 0;
     if (x.source === '優化比') r.opt += a; else if (x.source === '提升托育品質') r.q += a;
     else if (x.source === '縣府補助款') { const l = x.label || '縣府補助款'; r.sub[l] = (r.sub[l] || 0) + a } else r.other += a;
   }
+}
+function addPayroll(r, y, m) {
   const d = monthDoc(y, m);
   for (const p of d.payroll || []) r[p.src === '委辦費-人事費' ? 'wbHR' : 'opHR'] += +p.amount || 0;
   if (d.payroll) r.wbBiz += +(d.supervisor ?? N.supervisor) || 0;
-  for (const v of vouchersOf(y, m)) {
+}
+function addVouchers(r, list) {
+  for (const v of list) {
     if (isCustomSrc(v.src)) { r.cus[v.src] = (r.cus[v.src] || 0) + (+v.amount || 0); continue }
     r[SRC_KEY[v.src] || (v.src.startsWith('提升') ? 'qBiz' : 'opBiz')] += +v.amount || 0;
   }
+}
+function sysMonth(y, m) {
+  const r = emptyMonth(); r.fee = feeTotal(y, m);
+  addIncomes(r, incomesOf(y, m)); addPayroll(r, y, m); addVouchers(r, vouchersOf(y, m));
   return r;
 }
-function manualMonth(y, m) {
-  const r = emptyMonth();
+/* 補登的月份：Excel 的數字，再加上補登之後才在系統新增的憑證、撥款收入。
+   Excel 這個月沒有月費（或人事費）時，改用系統裡的月費（或人事費）。 */
+const manualAt = (y, m) => +((monthDoc(y, m).manual || {}).at) || 0;
+const addedAfterImport = x => (x.createdAt || 0) > manualAt(x.y, x.m);
+function manualExtra(y, m) {
+  const r = emptyMonth(), at = manualAt(y, m);
   for (const x of (monthDoc(y, m).manual || {}).rows || []) { const a = +x.a || 0; if (x.k === 'sub') r.sub[x.l] = (r.sub[x.l] || 0) + a; else if (x.k in r) r[x.k] += a; }
-  return r;
+  const vs = vouchersOf(y, m).filter(v => (v.createdAt || 0) > at), inc = incomesOf(y, m).filter(x => (x.createdAt || 0) > at);
+  const sysFee = !r.fee && feeTotal(y, m) > 0, sysPay = !r.wbHR && !r.opHR && !!monthDoc(y, m).payroll;
+  if (sysFee) r.fee = feeTotal(y, m);
+  if (sysPay) addPayroll(r, y, m);
+  addIncomes(r, inc); addVouchers(r, vs);
+  return { r, vs, inc, sysFee, sysPay };
 }
-// 這個月要用哪一種：補登、系統、還沒到（空白）
-const monthMode = (y, m) => m <= manualUntil(y) ? 'manual' : ymNum(y, m) > CYM ? 'future' : 'sys';
+const manualMonth = (y, m) => manualExtra(y, m).r;
+const manualPayroll = (y, m) => m <= manualUntil(y) && manualExtra(y, m).sysPay;   // 補登月份但人事費用系統的
+// 這個月要用哪一種：補登、系統、還沒到（空白）。下個月的月費會先算出來，所以下個月也列；更後面的月份有記帳才列
+const hasData = (y, m) => vouchersOf(y, m).length || incomesOf(y, m).length || monthDoc(y, m).payroll || Object.keys(monthDoc(y, m).fees || {}).length;
+const nextYM = () => shiftYM(CY, CM, 1);
+const monthMode = (y, m) => m <= manualUntil(y) ? 'manual' : ymNum(y, m) <= CYM || ymNum(y, m) === ymNum(nextYM().y, nextYM().m) || hasData(y, m) ? 'sys' : 'future';
 function annual(y) {
   const months = Array.from({ length: 12 }, (_, i) => { const mode = monthMode(y, i + 1); return { mode, d: mode === 'manual' ? manualMonth(y, i + 1) : mode === 'sys' ? sysMonth(y, i + 1) : null } });
   const vals = k => months.map(x => x.d ? x.d[k] : null);
@@ -221,8 +242,8 @@ function annual(y) {
 function wbPersonUsed() { const A = annual(CY); return (manualUntil(CY) ? 0 : +N.wbPersonUsedBefore || 0) + A.wb[0].total; }
 function wbUsed(cat) {
   let u = +(N.usedBefore || {})[cat] || 0; const mu = manualUntil(CY);
-  for (const v of vouchers()) if (v.y === CY && v.m > mu && v.src === '委辦費-業務費' && v.cat === cat) u += v.amount;
-  if (cat === N.firstItem) for (const d of yearMonths()) if (d.m > mu && d.payroll) u += +(d.supervisor ?? N.supervisor) || 0;
+  for (const v of vouchers()) if (v.y === CY && (v.m > mu || addedAfterImport(v)) && v.src === '委辦費-業務費' && v.cat === cat) u += v.amount;
+  if (cat === N.firstItem) for (const d of yearMonths()) if ((d.m > mu || manualPayroll(d.y, d.m)) && d.payroll) u += +(d.supervisor ?? N.supervisor) || 0;
   return u;
 }
 // 委辦業務費總共用了多少：有補登時用年度報表的數字（補登＋系統），沒有補登時用各細項加總（含啟用前已用）
@@ -631,7 +652,7 @@ function report() {
    <div class="tablewrap anwrap">${annualHTML(A)}</div>
    <div class="card" style="gap:8px">
     <div class="title">系統啟用前的月份</div>
-    <p class="hint" style="font-size:15px">${mu ? `1–${mu} 月用從 Excel 補登的數字，${mu + 1} 月起用系統裡的資料。` : '還沒補登。系統啟用前的月份，可以從原本的 Excel（每月報表）匯入。'}</p>
+    <p class="hint" style="font-size:15px">${mu ? `1–${mu} 月用從 Excel 補登的數字，再加上補登之後才在系統新增的憑證和撥款收入；${mu < 12 ? `${mu + 1} 月起用系統裡的資料。` : ''}` : '還沒補登。系統啟用前的月份，可以從原本的 Excel（每月報表）匯入。'}</p>${addedNote(CY)}
     <div class="actions start"><button type="button" class="btn" id="importYear">從 Excel 補登</button>${mu ? `<label class="check" style="font-weight:400">補登到<select id="muSel" style="width:auto;min-height:44px">${Array.from({ length: 13 }, (_, i) => `<option value="${i}" ${i === mu ? 'selected' : ''}>${i ? i + ' 月' : '不使用補登'}</option>`).join('')}</select></label>` : ''}</div>
    </div>
   </section>
@@ -645,6 +666,19 @@ function report() {
   <div class="tablewrap"><table><thead><tr><th>項目</th><th class="num">預算</th><th class="num">已用</th><th class="num">剩餘</th><th style="min-width:120px">使用率</th></tr></thead>
   <tbody>${wbItems().map(k => { const u = wbUsed(k), b = +(N.budget || {})[k] || 0, p = pct(u, b), cls = p >= 100 ? 'bad' : p >= 90 ? 'warn' : ''; return `<tr><td>${k}</td><td class="num">${fmt(b)}</td><td class="num">${fmt(u)}</td><td class="num ${b - u < 0 ? 'neg' : ''}">${fmt(b - u)}</td><td><div class="kpibar ${cls}"><i style="width:${Math.min(p, 100)}%"></i></div><span class="meta" style="margin:0">${b ? p + '%' : '—'}</span></td></tr>` }).join('')}</tbody></table></div>
   <div class="actions start"><button type="button" class="btn" data-go="set">調整預算或挪用</button></div></details>`;
+}
+// 補登月份另外加了哪些：列給使用者核對
+function addedNote(y) {
+  const mu = manualUntil(y), out = [];
+  for (let m = 1; m <= mu; m++) {
+    const x = manualExtra(y, m), parts = [];
+    if (x.sysFee) parts.push(`月費 ${fmt(x.r.fee)}（Excel 沒有，用系統的）`);
+    if (x.sysPay) parts.push('人事費（Excel 沒有，用系統的）');
+    if (x.vs.length) parts.push(`憑證 ${x.vs.length} 張共 ${fmt(x.vs.reduce((a, v) => a + (+v.amount || 0), 0))}`);
+    if (x.inc.length) parts.push(`撥款收入 ${fmt(x.inc.reduce((a, v) => a + (+v.amount || 0), 0))}`);
+    if (parts.length) out.push(`<li>${m} 月：${parts.join('、')}</li>`);
+  }
+  return out.length ? `<p class="hint" style="font-size:15px;margin-bottom:0">補登月份另外加上的：</p><ul class="hint" style="font-size:15px;margin:0;padding-left:1.4em">${out.join('')}</ul>` : '';
 }
 function vou() {
   const { y, m } = SEL_M.vou;
@@ -787,7 +821,7 @@ const HELP = [
   { id: 'cash', t: '零用金結算', shot: 'cash', steps: ['每月兩次，到「更多 → 零用金結算」。', '清單只列主任代墊的發票，照憑證編號排列，會計可以拿著憑證依序對帳。', '按「結算到今天」。還有發票沒做憑證、憑證沒印的，會先提醒你。', '結算過的清單在下方「已結算」，可以再列印。'] },
   { id: 'staff', t: '人事費', shot: 'staff', steps: ['薪資清冊做好後，到「更多 → 人事費」。', '每位員工填這個月的金額，經費來源預設委辦費-人事費。', '委辦人事費不夠時，按那位員工的「拆單」，填委辦費付多少，其餘自動改由營運收入支應。', '按「儲存本月人事費」。生日禮金、代班薪資、年終獎金在下方新增。'] },
   { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。餐點費看孩子到當月 1 號滿幾個月：未滿 6 個月不收、未滿 1 歲 300 元、滿 1 歲 600 元。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變；每年 1 月從 001 號重新開始。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。', '收據日期在頁面最上面，預設每月 15 號（遇週末順延），每個月可以自己改；預設幾號在「設定 → 收據」改，優化比、契約價金也可以設不同的預設日。', '有幾張要用不同的日期：按「勾選改日期」，像發票一樣勾選收據，在下方選日期後按「套用日期」。', '頁面下方「請款收據」：1、4、7、10 月會出現優化比（繳款人預設屏東縣政府；1 月是前一年第四期），1、2、7、10 月會出現契約價金（繳款人預設協會）。按「填寫」確認金額、貼上摘要，再按「列印」。其他要開的收據按「＋ 其他收據」。'] },
-  { id: 'report', t: '報表', shot: 'report', steps: ['「年度經費報表」照每月報表的格式，自動算每月收入、支出、損益，和委辦費、行管費用了幾 %。', '優化比、提升托育品質、縣府補助款到帳時，按「＋ 新增撥款收入」；補助款要選期別（第一期、第二期⋯），每一期各一列。', '按「列印（A4 橫式）」印一頁；按「匯出 Excel」下載和原本格式一樣的 Excel（標楷體、顏色、公式）。', '系統啟用前的月份，按「從 Excel 補登」選原本的經費明細檔，核對數字後按「補登」。要交縣府時按「產出核銷報表」。'] },
+  { id: 'report', t: '報表', shot: 'report', steps: ['「年度經費報表」照每月報表的格式，自動算每月收入、支出、損益，和委辦費、行管費用了幾 %。', '優化比、提升托育品質、縣府補助款到帳時，按「＋ 新增撥款收入」；補助款要選期別（第一期、第二期⋯），每一期各一列。', '按「列印（A4 橫式）」印一頁；按「匯出 Excel」下載和原本格式一樣的 Excel（標楷體、顏色、公式）。', '系統啟用前的月份，按「從 Excel 補登」選原本的經費明細檔，核對數字後按「補登」。補登之後才在系統新增的憑證、撥款收入會自動加上去；Excel 那個月沒有月費的，用系統算的月費。要交縣府時按「產出核銷報表」。'] },
   { id: 'trash', t: '刪錯了怎麼辦', shot: 'trash', steps: ['刪除的發票、取消的憑證會在「更多 → 垃圾桶」放 30 天。', '按「救回」就回到原本的地方，任何一台裝置都能救。', '剛刪掉時，畫面下方的提示也有「復原」可以按。'] },
   { id: 'backup', t: '備份與還原', shot: 'backup', steps: ['建議每個月到「更多 → 設定 → 備份」按「下載備份」，存到電腦。', '萬一資料被改錯，按「從備份還原」，選那個備份檔。', '還原前會先自動下載一份目前的資料，還原錯了還能再還原回來。', '備份之後才新增的資料不會被刪掉。', '管理者每月 25 號起會看到提醒，到「設定 → 備份」按「一次下載四間」，會下載四間的每月報表（Excel）和備份（還原用）兩個檔案。還原時選這個四間的備份檔也可以，會自動取出目前這間。'] },
   { id: 'install', t: '安裝成 App', steps: ['iPhone、iPad：用 Safari 開啟，按分享 →「加入主畫面」。', 'Android：用 Chrome 開啟，按右上選單 →「加到主畫面」或「安裝應用程式」。', '電腦（Windows、Mac、Chromebook）：用 Chrome 或 Edge 開啟，按網址列右邊的安裝圖示。', '從 LINE 點開的話，請先選「用預設瀏覽器開啟」，登入才會留下來。'] },
@@ -1748,5 +1782,5 @@ document.addEventListener('click', e => { const b = e.target.closest('button'); 
 const _render = render;
 render = function () { if (dirty && (view === 'set' || view === 'staff')) return; _render(); };
 
-window.__app = { go, get store() { return store }, upgrade: upgradeSettings, fillInv: fillInvForm, openWiz };   // 自動測試用
+window.__app = { go, get store() { return store }, upgrade: upgradeSettings, fillInv: fillInvForm, openWiz, annual };   // 自動測試用
 boot();
