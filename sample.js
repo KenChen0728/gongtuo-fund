@@ -40,7 +40,7 @@ export function sampleData({ CY, CM }) {
   const settledIds = invoices.filter(x => x.payer === '主任' && x.d <= 10).map(x => x.id);
   const rows = invoices.filter(x => settledIds.includes(x.id)).sort((a, b) => a.voucher.localeCompare(b.voucher)).map(x => ({ m: x.m, d: x.d, cat: x.cat, desc: x.desc, qty: x.qty, price: x.price, voucher: x.voucher }));
   invoices.forEach(x => { if (settledIds.includes(x.id)) x.settled = 's1' });
-  const settlements = [{ id: 's1', n: 1, y: CY, m: CM, date: `${CM}/10`, ids: settledIds, rows, total: rows.reduce((a, x) => a + x.qty * x.price, 0), createdAt: Date.now() }];
+  const settlements = [{ id: 's1', n: 1, y: CY, m: CM, date: `${CM}/10`, ids: invoices.filter(x => settledIds.includes(x.id)).sort((a, b) => a.voucher.localeCompare(b.voucher)).map(x => x.id), rows, total: rows.reduce((a, x) => a + x.qty * x.price, 0), createdAt: Date.now() }];
 
   const KN = ['陳小安', '林宥辰', '黃品妍', '張以晴', '李承恩', '王語彤', '吳柏宇', '劉思妤', '蔡宇翔', '楊沐恩', '許可薰', '鄭允晨', '謝芯妤', '郭承睿', '洪子喬', '曾若希', '邱宥寧', '廖品睿', '賴芊語', '周子謙'];
   const KB = ['2024-09-12', '2024-11-03', '2025-01-20', '2024-08-15', '2025-02-07', '2024-12-24', '2025-03-30', '2024-10-11', '2025-04-18', '2024-07-29', '2025-05-02', '2025-01-09', '2024-09-30', '2026-02-14', '2025-06-21', '2024-11-27', '2025-03-03', '2026-08-02', '2025-02-26', '2024-12-05'];

@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.18.8';
+const VERSION = '2026.11.18.9';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -452,10 +452,9 @@ function home() {
 function rowInv(x, withTick) {
   const payer = x.payer === '主任' ? '<span class="pill p-dir">主任代墊</span>' : `<span class="pill p-vendor">${esc(x.payer)}</span>`;
   const tick = withTick && !x.voucher ? `<button type="button" class="tick" role="checkbox" aria-checked="${sel.has(x.id)}" data-sel="${x.id}" aria-label="選取 ${esc(x.desc)}"><i>✓</i>選取</button>` : '';
-  const locked = x.voucher || x.settled;
   return `<div class="row">${tick}<div class="main"><div class="title">${esc(x.cat)}${x.cat === '幼兒食材' ? '' : '：' + esc(x.desc)}${x.food ? `<span class="meta" style="display:inline;margin-left:6px">（${esc(x.food)}）</span>` : ''}</div>
    <div class="meta">${payer}${pill(x.src)}<span>${x.y !== CY ? x.y + '/' : ''}${x.m}/${x.d}</span>${x.qty > 1 ? `<span>${x.qty} × ${fmt(x.price)}</span>` : ''}${x.voucher ? `<span class="pill p-done">${esc(x.voucher)}</span>` : ''}${x.settled && !x.voucher ? '<span class="pill p-todo">已結算</span>' : ''}</div></div>
-   <span class="amount">${fmt(amt(x))}</span>${!locked ? `<button type="button" class="edit" data-edit="${x.id}">修改</button>` : ''}</div>`;
+   <span class="amount">${fmt(amt(x))}</span><button type="button" class="edit" data-edit="${x.id}">修改</button></div>`;
 }
 /* 還沒做憑證的發票：照「類別＋付款對象＋經費來源」分組，一組就是可以合成一張憑證的發票 */
 function invGroups(list) {
@@ -478,7 +477,7 @@ function grpInv(g) {
     const what = x.cat === '幼兒食材' ? (x.food || x.desc || '幼兒食材') : x.desc;
     return `<div class="row"><button type="button" class="tick" role="checkbox" aria-checked="${sel.has(x.id)}" data-sel="${x.id}" aria-label="選取 ${esc(what)}"><i>✓</i>選取</button>
      <div class="main"><div class="title">${esc(what)}</div><div class="meta"><span>${x.y !== CY ? x.y + '/' : ''}${x.m}/${x.d}</span>${x.qty > 1 ? `<span>${x.qty} × ${fmt(x.price)}</span>` : ''}${x.settled ? '<span class="pill p-todo">已結算</span>' : ''}</div></div>
-     <span class="amount">${fmt(amt(x))}</span>${!x.settled ? `<button type="button" class="edit" data-edit="${x.id}">修改</button>` : ''}</div>`;
+     <span class="amount">${fmt(amt(x))}</span><button type="button" class="edit" data-edit="${x.id}">修改</button></div>`;
   }).join('')}</div>`;
 }
 function invView() {
@@ -661,8 +660,8 @@ function vou() {
     <div class="row"><div class="main"><div class="title"><span class="amount">${pre(y, m)}01</span>　${esc(N.firstItem)}</div><div class="meta">${pill('委辦費-業務費')}</div></div><span class="amount">${fmt(d.supervisor ?? N.supervisor)}</span></div>
     ${pay.map((r, i) => `<div class="row"><div class="main"><div class="title"><span class="amount">${pre(y, m)}${String(i + 2).padStart(2, '0')}</span>　${esc(r.name)} ${y}年${m}月薪資</div><div class="meta">${pill(r.src)}</div></div><span class="amount">${fmt(r.amount)}</span></div>`).join('')}</div></details>` : ''}
   ${list.length ? `<div class="list">${list.map(v => `<div class="row"><div class="main"><div class="title"><span class="amount">${esc(v.no)}</span>　${esc(v.desc)}</div>
-    <div class="meta">${pill(v.src)}<span>受款人：${esc(v.kind === 'inv' ? payeeLabel(v) : v.payee)}</span>${v.kind === 'inv' ? `${v.printed ? `<span class="pill p-done">已印 ${esc(v.printedAt)}</span>` : '<span class="pill p-todo">還沒印</span>'}<span>${isWB(v) ? '一般紙' : '色紙'}</span>` : '<span>另外製作</span>'}${v.note ? '<span>有備註</span>' : ''}</div></div>
-    <span class="amount">${fmt(v.amount)}</span>${v.kind === 'inv' ? `<button type="button" class="edit" data-printv="${esc(v.no)}">列印</button>` : ''}<button type="button" class="edit" data-cancelv="${esc(v.no)}">取消</button></div>`).join('')}</div>` : '<div class="empty">這個月還沒有憑證。到「發票」勾選發票，就能合併成憑證。</div>'}`;
+    <div class="meta">${pill(v.src)}<span>受款人：${esc(v.kind === 'inv' ? payeeLabel(v) : v.payee)}</span>${v.kind === 'inv' ? `${v.printed ? `<span class="pill p-done">已印 ${esc(v.printedAt)}</span>` : '<span class="pill p-todo">還沒印</span>'}<span>${isWB(v) ? '一般紙' : '色紙'}</span>` : '<span>另外製作</span>'}${v.note ? '<span>有備註</span>' : ''}${v.printed && v.amountPrinted != null && v.amountPrinted !== v.amount ? `<span class="when-warn">印後改過金額（紙本是 ${fmt(v.amountPrinted)}）</span>` : ''}</div></div>
+    <span class="amount">${fmt(v.amount)}</span><div class="acts">${v.kind === 'inv' ? `<button type="button" class="edit" data-vinv="${esc(v.no)}">修改</button><button type="button" class="edit" data-printv="${esc(v.no)}">列印</button>` : ''}<button type="button" class="edit" data-cancelv="${esc(v.no)}">取消</button></div></div>`).join('')}</div>` : '<div class="empty">這個月還沒有憑證。到「發票」勾選發票，就能合併成憑證。</div>'}`;
 }
 function cash() {
   const po = sortPetty(pettyOpen()), pt = po.reduce((a, x) => a + amt(x), 0);
@@ -784,7 +783,7 @@ const HELP = [
   { id: 'start', t: '第一次使用', shot: 'set', steps: ['到「更多 → 設定」，打開「公托資料」，填主任姓名和計畫主持人（01 號受款人），按「儲存公托資料」。', '打開「員工名單」，一行一位，順序就是薪資憑證的編號（第一位是 02）。', '打開「委辦費預算」，依契約書填人事費、業務費總額和各細項。', '到「月費」按「＋ 新增幼兒」，輸入座號、姓名和生日。'] },
   { id: 'add', t: '輸入發票', shot: 'dlginv', steps: ['拿到發票就按「＋ 新增發票」。', '代墊人預設是主任；付給廠商的選「付給廠商」並填廠商名稱。', '年、月已帶好，選日期、類別，填品名、數量和單價。經費來源會依類別自動帶出。', '不習慣一個畫面填很多欄位，可以在「本月」或「設定」改成一步一步模式。'] },
   { id: 'merge', t: '合併成憑證', shot: 'merge', steps: ['到「發票」，還沒做憑證的發票會照「類別＋付款對象」分組，同一組就能合成一張憑證。', '按組名右邊的「全選這組」，或自己勾選要合併的幾張。', '按下方「合併成憑證」，編號、受款人、經費來源、用途說明、金額都會自動帶入。', '需要時可以改用途說明，或加一行備註（會印在簽章欄下方）。', '建立憑證需要網路，避免兩台裝置用到同一個編號。'] },
-  { id: 'print', t: '列印憑證', shot: 'print', steps: ['到「更多 → 憑證與列印」，按「列印憑證」。', '還沒印的會先勾好；要補印的，在「要印哪幾張」清單自己勾起來。', '先印第 1 批委辦費（一般紙），再印第 2 批其他經費來源（色紙），畫面會說要放幾張色紙。', '可以左右滑動或按「上一張／下一張」看每一張。'] },
+  { id: 'print', t: '列印憑證', shot: 'print', steps: ['到「更多 → 憑證與列印」，按「列印憑證」。', '還沒印的會先勾好；要補印的，在「要印哪幾張」清單自己勾起來。', '先印第 1 批委辦費（一般紙），再印第 2 批其他經費來源（色紙），畫面會說要放幾張色紙。', '可以左右滑動或按「上一張／下一張」看每一張。', '印出後才發現發票金額錯了：按那張憑證的「修改」，選要改的發票，改好後憑證金額、結報清單和年度報表會一起更新，編號不變。紙本手改就好，不一定要重印。'] },
   { id: 'cash', t: '零用金結算', shot: 'cash', steps: ['每月兩次，到「更多 → 零用金結算」。', '清單只列主任代墊的發票，照憑證編號排列，會計可以拿著憑證依序對帳。', '按「結算到今天」。還有發票沒做憑證、憑證沒印的，會先提醒你。', '結算過的清單在下方「已結算」，可以再列印。'] },
   { id: 'staff', t: '人事費', shot: 'staff', steps: ['薪資清冊做好後，到「更多 → 人事費」。', '每位員工填這個月的金額，經費來源預設委辦費-人事費。', '委辦人事費不夠時，按那位員工的「拆單」，填委辦費付多少，其餘自動改由營運收入支應。', '按「儲存本月人事費」。生日禮金、代班薪資、年終獎金在下方新增。'] },
   { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。餐點費看孩子到當月 1 號滿幾個月：未滿 6 個月不收、未滿 1 歲 300 元、滿 1 歲 600 元。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變；每年 1 月從 001 號重新開始。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。', '收據日期在頁面最上面，預設每月 15 號（遇週末順延），每個月可以自己改；預設幾號在「設定 → 收據」改，優化比、契約價金也可以設不同的預設日。', '有幾張要用不同的日期：按「勾選改日期」，像發票一樣勾選收據，在下方選日期後按「套用日期」。', '頁面下方「請款收據」：1、4、7、10 月會出現優化比（繳款人預設屏東縣政府；1 月是前一年第四期），1、2、7、10 月會出現契約價金（繳款人預設協會）。按「填寫」確認金額、貼上摘要，再按「列印」。其他要開的收據按「＋ 其他收據」。'] },
@@ -1094,7 +1093,7 @@ function showVP(keep) {
     title: `列印憑證（${y} 年 ${m} 月）`, pages: selV.map(voucherSheet), tools, side, keep,
     goText: VP.batch === 1 ? `列印第 1 批（${selV.length} 張）` : `列印第 2 批（${selV.length} 張色紙）`,
     onPrint: () => {
-      store.batch(selV.map(v => ({ c: 'vouchers', id: v.no, update: { printed: true, printedAt: TODAY } }))).catch(fail());
+      store.batch(selV.map(v => ({ c: 'vouchers', id: v.no, update: { printed: true, printedAt: TODAY, amountPrinted: null } }))).catch(fail());
       selV.forEach(v => VP.chosen.delete(v.no));
       if (VP.batch === 1 && cnt(2)) { VP.batch = 2; toast(`第 1 批已印好。接著印第 2 批，請先放 ${cnt(2)} 張色紙。`); }
       else toast(`已印 ${selV.length} 張，已標記「已印」。`);
@@ -1120,7 +1119,10 @@ function fillInvForm(x) {
   y.value = x ? x.y : CY; m.value = x ? x.m : CM; d.value = x ? x.d : '';
   c.value = x ? x.cat : ''; $('#iDesc').value = x ? x.desc : ''; $('#iFood').value = x ? x.food : '';
   $('#iQty').value = x ? x.qty : 1; $('#iPrice').value = x ? x.price : ''; $('#iOtherName').value = '';
-  $('#iDel').hidden = !x; $('#invTitle').textContent = x ? '修改發票' : '新增發票';
+  const lk = !!(x && (x.voucher || x.settled));          // 已做成憑證或已結算：付款對象和類別不能改，也不能刪
+  ['iPayer', 'iVendor', 'iCat'].forEach(id => $('#' + id).disabled = lk);
+  $('#iLock').hidden = !lk; if (lk) $('#iLock').textContent = `這張發票在${lockWhere(x)}裡，付款對象和類別不能改；要改請先取消憑證。改了金額，${[x.voucher && '憑證', x.settled && '結報清單'].filter(Boolean).join('和')}會一起更新。`;
+  $('#iDel').hidden = !x || lk; $('#invTitle').textContent = x ? '修改發票' : '新增發票';
   syncInv();
 }
 function syncInv() {
@@ -1154,6 +1156,42 @@ function delCategory(src, name, btn) {
     toast(`已刪除「${name}」。`, () => { store.setSettings({ cats: before }).catch(fail()); toast('已復原') });
   }, '刪除', 'btn primary');
 }
+// 已做成憑證或已結算的發票在哪裡
+function lockWhere(x) {
+  const v = x.voucher && S().vouchers.find(v => v.no === x.voucher), st = x.settled && S().settlements.find(s => s.id === x.settled);
+  return [v ? `憑證 ${v.no}${v.printed ? '（已印）' : ''}` : '', st ? `${st.m} 月第 ${st.n} 次結報清單` : ''].filter(Boolean).join('和') || '憑證';
+}
+function openEditInv(id) { editId = id; vendorsList(); fillInvForm(S().invoices.find(x => x.id === id)); $('#dlgInv').showModal() }
+// 修改發票：已做成憑證或已結算的先說明改了會一起更新什麼
+function editInvGuard(id) {
+  const x = S().invoices.find(i => i.id === id); if (!x) return;
+  if (!x.voucher && !x.settled) return openEditInv(id);
+  const what = [x.voucher && '憑證金額', x.settled && '結報清單', '年度經費報表'].filter(Boolean).join('、');
+  ask(x.voucher ? `這張發票在憑證 ${x.voucher} 裡` : '這張發票已經結算', `<p class="hint">這張發票在${lockWhere(x)}裡。改了金額後，${what}會一起更新，編號不變。</p><p class="hint">紙本已經手改的話不用重印；要重印也可以，${x.voucher ? '到「更多 → 憑證與列印」按那張的「列印」' : ''}${x.voucher && x.settled ? '，' : ''}${x.settled ? '到「更多 → 零用金結算 → 已結算」按「列印」' : ''}。</p>`, () => { setTimeout(() => openEditInv(id)) }, '繼續修改');
+}
+// 已做成憑證或已結算的發票改了之後：憑證金額、結報清單一起更新。回傳要告訴使用者的變動
+function updateLockedInvoice(id, doc) {
+  const old = S().invoices.find(x => x.id === id), nx = { ...old, ...doc }, ops = [{ c: 'invoices', id, update: doc }], msg = [];
+  const v = old.voucher && S().vouchers.find(v => v.no === old.voucher);
+  if (v) {
+    const amount = (v.ids || []).reduce((a, i) => a + (i === id ? amt(nx) : amt(S().invoices.find(x => x.id === i) || {})), 0);
+    if (amount !== v.amount) {
+      ops.push({ c: 'vouchers', id: v.no, update: { amount, ...(v.printed && v.amountPrinted == null ? { amountPrinted: v.amount } : {}) } });
+      msg.push(`憑證 ${v.no} 改成 ${fmt(amount)} 元（原 ${fmt(v.amount)} 元）`);
+    }
+  }
+  const st = old.settled && S().settlements.find(s => s.id === old.settled);
+  const same = r => r && r.m === old.m && r.d === old.d && r.cat === old.cat && r.desc === old.desc && +r.qty === +old.qty && +r.price === +old.price;
+  let i = st ? (st.ids || []).indexOf(id) : -1;                  // 清單的列和 ids 同順序；對不上時用原本的內容找
+  if (st && !same(st.rows[i])) i = st.rows.findIndex(same);
+  if (st && i >= 0) {
+    const rows = st.rows.map((r, k) => k === i ? { ...r, m: nx.m, d: nx.d, cat: nx.cat, desc: nx.desc, qty: nx.qty, price: nx.price } : r), total = rows.reduce((a, r) => a + amt(r), 0);
+    ops.push({ c: 'settlements', id: st.id, update: { rows, total } });
+    if (total !== st.total) msg.push(`${st.m} 月第 ${st.n} 次結報清單改成 ${fmt(total)} 元（原 ${fmt(st.total)} 元）`);
+  }
+  store.batch(ops).catch(fail());
+  return msg.join('；');
+}
 function saveInvoice(data, id) {
   const doc = { ...data, ym: ymNum(data.y, data.m) };
   if (id) return store.update('invoices', id, doc).catch(fail());
@@ -1170,7 +1208,10 @@ $('#fInv').addEventListener('submit', e => {
   if (msg) { e.preventDefault(); toast(msg); return }
   let src;
   if (cat === '__other') { cat = $('#iOtherName').value.trim(); src = $('#iOtherSrc').value; addCategory(cat, src) } else src = invSrc(cat);
-  saveInvoice({ y, m, d, payer, cat, src, desc, qty: +$('#iQty').value || 1, price, food: cat === '幼兒食材' ? $('#iFood').value.trim() : '' }, editId);
+  const doc = { y, m, d, payer, cat, src, desc, qty: +$('#iQty').value || 1, price, food: cat === '幼兒食材' ? $('#iFood').value.trim() : '' };
+  const old = editId && S().invoices.find(x => x.id === editId);
+  if (old && (old.voucher || old.settled)) { const c = updateLockedInvoice(editId, { ...doc, ym: ymNum(y, m) }); return toast(c ? `已儲存。${c}。` : '已儲存。') }
+  saveInvoice(doc, editId);
   toast(editId ? '已儲存' : payer === '主任' ? '已儲存，也列進零用金清單了。' : '已儲存。');
 });
 $('#iDel').onclick = () => {
@@ -1347,7 +1388,7 @@ $('#kRcpt').onclick = () => {
 
 /* ===== 通用對話框 ===== */
 function ask(title, body, onOk, okText, okClass) {
-  $('#aTitle').textContent = title; $('#aBody').innerHTML = body; $('#aOk').textContent = okText || '確定'; $('#aOk').className = okClass || 'btn primary';
+  $('#aTitle').textContent = title; $('#aBody').innerHTML = body; $('#aOk').textContent = okText || '確定'; $('#aOk').className = okClass || 'btn primary'; $('#aOk').hidden = okText === null;
   $('#fAsk').onsubmit = e => { if (onOk() === false) e.preventDefault() };
   $('#dlgAsk').showModal();
 }
@@ -1495,7 +1536,12 @@ document.addEventListener('click', e => {
   if (t.dataset.mnav) { FP = null; const s = SEL_M[t.dataset.mnav], d = +t.dataset.d; const r = d === 0 ? { y: CY, m: CM } : shiftYM(s.y, s.m, d); s.y = r.y; s.m = r.m; dirty = false; return render() }
   if (t.dataset.sel) { const id = t.dataset.sel; sel.has(id) ? sel.delete(id) : sel.add(id); t.setAttribute('aria-checked', sel.has(id)); syncGrpBtns(); return updateMerge() }
   if (t.dataset.selgrp) { const ids = t.dataset.selgrp.split(','); if (grpAll(ids)) ids.forEach(id => sel.delete(id)); else { sel.clear(); ids.forEach(id => sel.add(id)) } document.querySelectorAll('[data-sel]').forEach(b => b.setAttribute('aria-checked', sel.has(b.dataset.sel))); syncGrpBtns(); return updateMerge() }
-  if (t.dataset.edit) { editId = t.dataset.edit; vendorsList(); fillInvForm(S().invoices.find(x => x.id === editId)); return $('#dlgInv').showModal() }
+  if (t.dataset.edit) { const id = t.dataset.edit; if (t.closest('#dlgAsk')) { $('#dlgAsk').close(); return setTimeout(() => editInvGuard(id)) } return editInvGuard(id) }
+  if (t.dataset.vinv) {          // 憑證的「修改」：一張發票直接改；好幾張先選要改哪一張
+    const v = S().vouchers.find(x => x.no === t.dataset.vinv), list = (v.ids || []).map(id => S().invoices.find(x => x.id === id)).filter(Boolean);
+    if (list.length === 1) return editInvGuard(list[0].id);
+    return ask(`修改憑證 ${v.no} 的發票`, `<p class="hint">這張憑證有 ${list.length} 張發票，要改哪一張？改了金額，憑證金額會一起更新。</p><div class="list">${list.map(x => `<div class="row"><div class="main"><div class="title">${esc(x.cat === '幼兒食材' && x.food ? x.food : x.desc)}</div><div class="meta"><span>${x.m}/${x.d}</span>${x.qty > 1 ? `<span>${x.qty} × ${fmt(x.price)}</span>` : ''}</div></div><span class="amount">${fmt(amt(x))}</span><button type="button" class="edit" data-edit="${x.id}">修改</button></div>`).join('')}</div>`, () => {}, null);
+  }
   if (t.dataset.filter) { invFilter = t.dataset.filter; sel.clear(); return render() }
   if (t.dataset.cash) { cashTab = t.dataset.cash; return render() }
   if (t.dataset.batch) { VP.batch = +t.dataset.batch; return showVP() }
@@ -1516,7 +1562,7 @@ document.addEventListener('click', e => {
     return toast(r && r.no ? `已刪除收據 ${rcptNo(r.no)}。這個號碼不會再用到，紙本請註明作廢。` : '已刪除收據。', () => { store.set('months', ymKey(y, m), { y, m, xr: { [id]: r } }).catch(fail()); toast('已復原') });
   }
   if (t.id === 'rDateReset') { const { y, m } = SEL_M.fee; store.set('months', ymKey(y, m), { y, m, rcptDate: null }).catch(fail()); const r = autoReceiptDate(y, m); return toast(`${m} 月收據日期改回 ${r.m}/${r.d}。`) }
-  if (t.dataset.printv) { const v = S().vouchers.find(x => x.no === t.dataset.printv); return openPreview({ title: `支出憑證 ${v.no}`, pages: [voucherSheet(v)], onPrint: () => store.update('vouchers', v.no, { printed: true, printedAt: TODAY }).catch(fail()) }) }
+  if (t.dataset.printv) { const v = S().vouchers.find(x => x.no === t.dataset.printv); return openPreview({ title: `支出憑證 ${v.no}`, pages: [voucherSheet(v)], onPrint: () => store.update('vouchers', v.no, { printed: true, printedAt: TODAY, amountPrinted: null }).catch(fail()) }) }
   if (t.dataset.cancelv) {
     const v = S().vouchers.find(x => x.no === t.dataset.cancelv);
     return ask(`取消憑證 ${v.no}`, `<p class="hint">${esc(v.desc)}，${fmt(v.amount)} 元。取消後${v.kind === 'inv' ? '這些發票會回到「還沒做憑證」，' : ''}憑證放進垃圾桶 30 天，可以救回。編號不會被重複使用。</p>`, () => {
