@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.18.5';
+const VERSION = '2026.11.18.6';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -807,9 +807,11 @@ function help() {
 }
 
 /* ===== 紙本內容 ===== */
-// 受款人：主任代墊（自己公托的人）前面加「X公托」；廠商照名稱；已經寫「X公托 姓名」的照寫的
-const payeeOwn = v => v.own ?? (v.kind === 'inv' && (v.payee === N.director || (v.ids || []).some(id => S().invoices.find(x => x.id === id)?.payer === '主任')));
-const payeeLabel = v => !v.payee || /公托/.test(v.payee) || !payeeOwn(v) ? v.payee || '' : `${N.short}公托 ${v.payee}`;
+// 受款人：自己公托的人（主任代墊、員工名單上的老師、計畫主持人）前面加「X公托」；廠商照名稱；已經寫「X公托 姓名」的照寫的
+const ownName = n => !!n && [N.director, N.pi, ...(N.staff || [])].some(x => x && x.trim() === n.trim());
+const payeeOwn = v => !!v.own || ownName(v.payee) || (v.kind === 'inv' && (v.ids || []).some(id => S().invoices.find(x => x.id === id)?.payer === '主任'));
+const nurseryPrefix = (n, own) => !n || /公托/.test(n) || !own ? n || '' : `${N.short}公托 ${n}`;
+const payeeLabel = v => nurseryPrefix(v.payee, payeeOwn(v));
 function voucherSheet(v) {
   const s = String(Math.round(v.amount)).padStart(6, ' ').split('');
   return `<h3>${esc(N.assoc)}</h3><h4>支出憑證粘存單</h4>
@@ -1253,7 +1255,7 @@ const autoDesc = list => { const cat = list[0].cat; if (cat === '幼兒食材') 
 function openMerge() {
   const list = [...sel].map(id => S().invoices.find(x => x.id === id)).filter(Boolean).sort((a, b) => a.ym - b.ym || a.d - b.d);
   $('#mNo').textContent = nextNo();
-  $('#mPayee').textContent = list[0].payer === '主任' ? `${N.short}公托 ${N.director || '主任'}（主任代墊）` : list[0].payer;
+  $('#mPayee').textContent = list[0].payer === '主任' ? `${N.short}公托 ${N.director || '主任'}（主任代墊）` : nurseryPrefix(list[0].payer, ownName(list[0].payer));
   $('#mSrc').innerHTML = pill(list[0].src);
   $('#mDesc').value = autoDesc(list); $('#mNote').value = '';
   $('#mCount').textContent = list.length; $('#mAmt').textContent = fmt(list.reduce((a, x) => a + amt(x), 0));
