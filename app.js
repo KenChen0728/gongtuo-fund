@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.19.2';
+const VERSION = '2026.11.19.3';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -1193,10 +1193,14 @@ function fillInvForm(x) {
   y.value = x ? x.y : CY; m.value = x ? x.m : CM; d.value = x ? x.d : '';
   c.value = x ? x.cat : ''; $('#iDesc').value = x ? x.desc : ''; $('#iFood').value = x ? x.food : '';
   $('#iQty').value = x ? x.qty : 1; $('#iPrice').value = x ? x.price : ''; $('#iOtherName').value = '';
-  const lk = !!(x && (x.voucher || x.settled));          // 已做成憑證或已結算：付款對象和類別不能改，也不能刪
-  ['iPayer', 'iVendor', 'iCat'].forEach(id => $('#' + id).disabled = lk);
-  $('#iLock').hidden = !lk; if (lk) $('#iLock').textContent = `這張發票在${lockWhere(x)}裡，付款對象和類別不能改；要改請先取消憑證。改了金額，${[x.voucher && '憑證', x.settled && '結報清單'].filter(Boolean).join('和')}會一起更新。`;
-  $('#iDel').hidden = !x || lk; $('#invTitle').textContent = x ? '修改發票' : '新增發票';
+  // 在憑證裡：付款對象、類別（經費來源）不能改，也不能刪，要先取消憑證。
+  // 只有結算過（憑證已取消或還沒做）：類別可以改、可以刪，結報清單一起更新；付款對象仍是主任，不能改
+  const inV = !!(x && x.voucher), inS = !!(x && x.settled), lk = inV || inS;
+  ['iPayer', 'iVendor'].forEach(id => $('#' + id).disabled = lk); $('#iCat').disabled = inV;
+  $('#iLock').hidden = !lk;
+  if (lk) $('#iLock').textContent = inV ? `這張發票在${lockWhere(x)}裡，付款對象和類別（經費來源）不能改，也不能刪；要改請先到「憑證與列印」取消憑證。改了金額，憑證${inS ? '和結報清單' : ''}會一起更新。`
+    : `這張發票已列在${lockWhere(x)}，付款對象不能改。改了類別或金額，結報清單會一起更新；刪除會從結報清單拿掉。`;
+  $('#iDel').hidden = !x || inV; $('#invTitle').textContent = x ? '修改發票' : '新增發票';
   syncInv();
 }
 function syncInv() {
@@ -1289,7 +1293,16 @@ $('#fInv').addEventListener('submit', e => {
   toast(editId ? '已儲存' : payer === '主任' ? '已儲存，也列進零用金清單了。' : '已儲存。');
 });
 $('#iDel').onclick = () => {
-  const id = editId; $('#dlgInv').close(); sel.delete(id);
+  const id = editId, x = S().invoices.find(i => i.id === id), st = x && x.settled && S().settlements.find(s => s.id === x.settled);
+  if (st) {          // 結算過的發票：從結報清單拿掉，總額跟著改
+    const i = (st.ids || []).indexOf(id), rows = st.rows.filter((_, k) => k !== i), ids = st.ids.filter(v => v !== id), total = rows.reduce((a, r) => a + amt(r), 0);
+    return ask('刪除這張發票', `<p class="hint">這張發票列在${st.m} 月第 ${st.n} 次結報清單。刪除後清單會拿掉這一張，總額從 ${fmt(st.total)} 元改成 ${fmt(total)} 元，紙本請手改或重印。</p><p class="hint">發票放進垃圾桶 30 天，可以救回（救回後回到零用金清單，要重新結算）。</p>`, () => {
+      $('#dlgInv').close(); sel.delete(id);
+      store.batch([{ c: 'invoices', id, update: { deleted: true, deletedAt: Date.now(), settled: null } }, { c: 'settlements', id: st.id, update: { rows, ids, total } }]).catch(fail('沒有刪除成功，請再試一次。'));
+      toast(`已刪除，${st.m} 月第 ${st.n} 次結報清單改成 ${fmt(total)} 元。`, () => { store.batch([{ c: 'invoices', id, update: { deleted: false, deletedAt: null, settled: st.id } }, { c: 'settlements', id: st.id, update: { rows: st.rows, ids: st.ids, total: st.total } }]).catch(fail()); toast('已復原') });
+    }, '刪除', 'btn danger');
+  }
+  $('#dlgInv').close(); sel.delete(id);
   store.update('invoices', id, { deleted: true, deletedAt: Date.now() }).catch(fail('沒有刪除成功，請再試一次。'));
   toast('已刪除，30 天內可以在垃圾桶救回。', () => { store.update('invoices', id, { deleted: false, deletedAt: null }).catch(fail()); toast('已復原') });
 };
