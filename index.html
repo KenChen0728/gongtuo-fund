@@ -154,6 +154,11 @@
     </details>
     <div id="kFeeBox" style="display:flex;flex-direction:column;gap:12px">
       <div class="two">
+        <label>月費<input type="number" id="kFeeOv" inputmode="numeric"></label>
+        <label>餐點費<input type="number" id="kMealOv" inputmode="numeric"></label>
+      </div>
+      <p class="hint" style="font-size:14px;margin:-4px 0 0">空白＝系統自動算（灰字是系統算的金額）；要改才填數字，清空就回到系統算的。<span id="kOvNote" class="when-warn" hidden>這個月已手改金額。</span></p>
+      <div class="two">
         <label>上課天數<input type="number" id="kDays" inputmode="numeric" placeholder="全月不用填"></label>
         <label>延托費<input type="number" id="kLate" inputmode="numeric" placeholder="0"></label>
       </div>

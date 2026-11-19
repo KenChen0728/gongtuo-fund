@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.19.8';
+const VERSION = '2026.11.19.9';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -105,9 +105,11 @@ function kidCalc(k, f, y, m) {
   f = f || {};
   const am = ageMonths(k.birth, y, m), mealFull = am < 6 ? 0 : am < 12 ? 300 : 600;
   const days = f.days === '' || f.days == null ? null : +f.days;
-  const fee = days == null ? 12000 : days * 400;
-  const meal = mealFull === 0 ? 0 : (days == null ? mealFull : days * (mealFull / 30));   // 600 元一天 20，300 元一天 10
-  return { fee, meal, am, total: fee + meal + (+f.late || 0) + (+f.ins || 0) + (+f.refund || 0) };
+  const autoFee = days == null ? 12000 : days * 400;
+  const autoMeal = mealFull === 0 ? 0 : (days == null ? mealFull : days * (mealFull / 30));   // 600 元一天 20，300 元一天 10
+  // 月費、餐點費預設系統算；手改過（feeOv、mealOv 有填）就用手改的
+  const has = v => v !== '' && v != null, fee = has(f.feeOv) ? +f.feeOv : autoFee, meal = has(f.mealOv) ? +f.mealOv : autoMeal;
+  return { fee, meal, am, autoFee, autoMeal, ovFee: has(f.feeOv), ovMeal: has(f.mealOv), total: fee + meal + (+f.late || 0) + (+f.ins || 0) + (+f.refund || 0) };
 }
 const feeTotal = (y, m) => { const d = monthDoc(y, m); return monthKids(y, m).reduce((a, k) => a + kidCalc(k, (d.fees || {})[k.id], y, m).total, 0); };
 function chNum(n) {
@@ -561,7 +563,7 @@ function fee() {
   ${kids.length ? `<div class="list">${kids.map((k, i) => {
     const f = fees[k.id] || {}, c = kidCalc(k, f, y, m), ex = [];
     if (f.days !== '' && f.days != null) ex.push(`上課 ${f.days} 天`);
-    ex.push(`月費 ${fmt(c.fee)}`); ex.push(c.meal ? `餐點費 ${fmt(c.meal)}` : '未滿 6 個月不收餐點費');
+    ex.push(`月費 ${fmt(c.fee)}${c.ovFee ? '（手改）' : ''}`); ex.push(c.meal || c.ovMeal ? `餐點費 ${fmt(c.meal)}${c.ovMeal ? '（手改）' : ''}` : '未滿 6 個月不收餐點費');
     if (+f.late) ex.push(`延托 ${fmt(f.late)}`); if (+f.ins) ex.push(`保險 ${fmt(f.ins)}`);
     const own = (d.kidDates || {})[k.id] && kidRcptDate(y, m, k.id);
     return `<div class="row">${fpTick('k:' + k.id, k.name)}<div class="main"><div class="title">${k.seat}. ${esc(k.name)}${k.active === false ? ' <span class="pill p-todo">已離開</span>' : ''}</div><div class="meta"><span>收據 ${rcptNo(nos[i])}</span>${own ? `<span class="when-warn">日期 ${md(own)}</span>` : ''}${ex.map(e => `<span>${e}</span>`).join('')}${+f.refund ? `<span class="when-bad">退費 ${fmt(f.refund)}</span>` : ''}</div></div><span class="amount">${fmt(c.total)}</span><button type="button" class="edit" data-kid="${k.id}">修改</button></div>`
@@ -905,7 +907,7 @@ const HELP = [
   { id: 'print', t: '列印憑證', shot: 'print', steps: ['到「更多 → 憑證與列印」，按「列印憑證」。', '還沒印的會先勾好；要補印的，在「要印哪幾張」清單自己勾起來。', '先印第 1 批委辦費（一般紙），再印第 2 批其他經費來源（色紙），畫面會說要放幾張色紙。', '可以左右滑動或按「上一張／下一張」看每一張。', '印出後才發現發票金額錯了：按那張憑證的「修改」，選要改的發票，改好後憑證金額、結報清單和年度報表會一起更新，編號不變。紙本手改就好，不一定要重印。'] },
   { id: 'cash', t: '零用金結算', shot: 'cash', steps: ['每月兩次，到「更多 → 零用金結算」。', '清單列主任代墊的發票，還有生日禮金、考核獎金（主任代墊），照憑證編號排列，會計可以拿著憑證依序對帳。', '預設全部勾選；這次只要結算其中幾張，把其他的勾勾拿掉，沒勾的會留到下一次。', '按「結算到今天」。還有發票沒做憑證、憑證沒印的，會先提醒你。', '結算過的清單在下方「已結算」，可以再列印；結算後才發現問題，按「退回」，發票回到本期改好再重新結算。'] },
   { id: 'staff', t: '人事費', shot: 'staff', steps: ['薪資清冊做好後，到「更多 → 人事費」。', '每位員工填這個月的金額，經費來源預設委辦費-人事費。', '委辦人事費不夠時，按那位員工的「拆單」，填委辦費付多少，其餘自動改由營運收入支應。', '按「儲存本月人事費」。員工的生日月份在「設定 → 員工名單」填好，生日那個月儲存人事費時會自動建立生日禮金（預設 500 元），首頁也會提醒。', '生日禮金、考核獎金和外聘督導費的憑證，按「列印」會先填領款收據（日期、姓名、服務單位等；地址和身分證字號可以留空給領款人手寫，填了也不會存起來），印成上面粘存單、下面領款收據。', '考核獎金：打開「考核獎金（一次填所有員工）」，選期別，每位員工選等第（優等 5,000、甲等 3,000 會自動帶入，可改），按「建立考核獎金憑證」。', '12 月會多一區「年度年終獎金」，每位員工直接填金額，按「建立年終獎金憑證」一次做好。代班薪資和其他月份的生日禮金、年終獎金在下方「其他人事支出」新增。'] },
-  { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。餐點費看孩子到當月 1 號滿幾個月：未滿 6 個月不收、未滿 1 歲 300 元、滿 1 歲 600 元。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變；每年 1 月從 001 號重新開始。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。', '收據日期在頁面最上面，預設每月 15 號（遇週末順延），每個月可以自己改；預設幾號在「設定 → 收據」改，優化比、契約價金也可以設不同的預設日。', '只想先印幾張：按「勾選收據」，勾選要印的（可以全選、全部不選），按「列印勾選的」；沒勾的之後再印。', '有幾張要用不同的日期：一樣按「勾選收據」，勾選後在下方選日期，按「套用日期」。', '頁面下方「請款收據」：1、4、7、10 月會出現優化比（繳款人預設屏東縣政府；1 月是前一年第四期），1、2、7、10 月會出現契約價金（繳款人預設協會）。按「填寫」確認金額、貼上摘要，再按「列印」。其他要開的收據按「＋ 其他收據」。'] },
+  { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。餐點費看孩子到當月 1 號滿幾個月：未滿 6 個月不收、未滿 1 歲 300 元、滿 1 歲 600 元。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。月費、餐點費預設系統算，要改金額就在「修改」裡的「月費」「餐點費」欄填數字，清空就回到系統算的。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變；每年 1 月從 001 號重新開始。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。', '收據日期在頁面最上面，預設每月 15 號（遇週末順延），每個月可以自己改；預設幾號在「設定 → 收據」改，優化比、契約價金也可以設不同的預設日。', '只想先印幾張：按「勾選收據」，勾選要印的（可以全選、全部不選），按「列印勾選的」；沒勾的之後再印。', '有幾張要用不同的日期：一樣按「勾選收據」，勾選後在下方選日期，按「套用日期」。', '頁面下方「請款收據」：1、4、7、10 月會出現優化比（繳款人預設屏東縣政府；1 月是前一年第四期），1、2、7、10 月會出現契約價金（繳款人預設協會）。按「填寫」確認金額、貼上摘要，再按「列印」。其他要開的收據按「＋ 其他收據」。'] },
   { id: 'report', t: '報表', shot: 'report', steps: ['「年度經費報表」照每月報表的格式，自動算每月收入、支出、損益，和委辦費、行管費用了幾 %。', '優化比、提升托育品質、縣府補助款到帳時，按「＋ 新增撥款收入」；補助款要選期別（第一期、第二期⋯），每一期各一列。', '按「列印（A4 橫式）」印一頁；按「匯出 Excel」下載和原本格式一樣的 Excel（標楷體、顏色、公式）。', '委辦業務費有項目快用完或超支時，報表頁會列出「不夠用的項目」，按「補足」選要從哪一項轉出、金額，業務費總額不變；挪用紀錄可以還原。', '系統啟用前的月份，按「從 Excel 補登」選原本的經費明細檔，核對數字後按「補登」。補登之後才在系統新增的憑證、撥款收入會自動加上去；Excel 那個月沒有月費的，用系統算的月費。要交縣府時按「產出核銷報表」。'] },
   { id: 'trash', t: '刪錯了怎麼辦', shot: 'trash', steps: ['刪除的發票、取消的憑證會在「更多 → 垃圾桶」放 30 天。', '按「救回」就回到原本的地方，任何一台裝置都能救。', '剛刪掉時，畫面下方的提示也有「復原」可以按。', '憑證做錯想沿用同一個編號：先取消憑證，再到垃圾桶按「永久刪除」，下一張新做的憑證就會用這個編號。'] },
   { id: 'backup', t: '備份與還原', shot: 'backup', steps: ['建議每個月到「更多 → 設定 → 備份」按「下載備份」，存到電腦。', '萬一資料被改錯，按「從備份還原」，選那個備份檔。', '還原前會先自動下載一份目前的資料，還原錯了還能再還原回來。', '備份之後才新增的資料不會被刪掉。', '管理者每月 25 號起會看到提醒，到「設定 → 備份」按「一次下載四間」，會下載四間的每月報表（Excel）和備份（還原用）兩個檔案。還原時選這個四間的備份檔也可以，會自動取出目前這間。'] },
@@ -1551,13 +1553,15 @@ const bonusData = (y, name, a) => ({ payee: name, src: '營運收入支應-年�
 
 /* ===== 孩子 ===== */
 let kidId = null;
-function kidFields() { return { days: $('#kDays').value === '' ? '' : +$('#kDays').value, late: $('#kLate').value === '' ? '' : +$('#kLate').value, ins: $('#kIns').value === '' ? '' : +$('#kIns').value, refund: $('#kRefund').value === '' ? '' : +$('#kRefund').value } }
+function kidFields() { const ov = id => $(id).value === '' ? '' : +$(id).value; return { feeOv: ov('#kFeeOv'), mealOv: ov('#kMealOv'), days: $('#kDays').value === '' ? '' : +$('#kDays').value, late: $('#kLate').value === '' ? '' : +$('#kLate').value, ins: $('#kIns').value === '' ? '' : +$('#kIns').value, refund: $('#kRefund').value === '' ? '' : +$('#kRefund').value } }
 function kidSync() {
   const { y, m } = SEL_M.fee;
   const k = { birth: $('#kBirth').value };
   const f = kidFields(), c = kidCalc(k, f, y, m);
   $('#kCalc').textContent = `月費 ${fmt(c.fee)}＋餐點費 ${fmt(c.meal)}${+f.late ? `＋延托 ${fmt(f.late)}` : ''}${+f.ins ? `＋保險 ${fmt(f.ins)}` : ''}${+f.refund ? `－退費 ${fmt(-f.refund)}` : ''}`;
   $('#kTotal').textContent = fmt(c.total);
+  $('#kFeeOv').placeholder = `系統算 ${fmt(c.autoFee)}`; $('#kMealOv').placeholder = `系統算 ${fmt(c.autoMeal)}`;
+  $('#kOvNote').hidden = !(c.ovFee || c.ovMeal);
   if (k.birth) $('#kInfo').textContent = mealInfo(c, y, m);
 }
 const mealInfo = (c, y, m) => `${y} 年 ${m} 月・到 ${m}/1 滿 ${Math.max(0, c.am)} 個月，${c.am < 6 ? '未滿 6 個月不收餐點費' : c.am < 12 ? '餐點費 300 元' : '餐點費 600 元'}`;
@@ -1570,11 +1574,11 @@ function openKid(id) {
   $('#kInfo').textContent = k ? mealInfo(c, y, m) : '填座號、姓名和生日，月費和餐點費會自動算。';
   $('#kBasic').open = !k;
   $('#kSeat').value = k ? k.seat : nextSeat; $('#kName').value = k ? k.name : ''; $('#kBirth').value = k ? k.birth || '' : '';
-  $('#kDays').value = f.days ?? ''; $('#kLate').value = f.late ?? ''; $('#kIns').value = f.ins ?? ''; $('#kRefund').value = f.refund ?? ''; $('#kNote').value = '';
+  $('#kFeeOv').value = f.feeOv ?? ''; $('#kMealOv').value = f.mealOv ?? ''; $('#kDays').value = f.days ?? ''; $('#kLate').value = f.late ?? ''; $('#kIns').value = f.ins ?? ''; $('#kRefund').value = f.refund ?? ''; $('#kNote').value = '';
   $('#kLeave').hidden = !k || k.active === false; $('#kRcpt').hidden = !k;
   kidSync(); $('#dlgKid').showModal();
 }
-['kDays', 'kLate', 'kIns', 'kRefund', 'kBirth'].forEach(id => $('#' + id).addEventListener('input', kidSync));
+['kDays', 'kLate', 'kIns', 'kRefund', 'kBirth', 'kFeeOv', 'kMealOv'].forEach(id => $('#' + id).addEventListener('input', kidSync));
 $('#fKid').addEventListener('submit', e => {
   const { y, m } = SEL_M.fee;
   const name = $('#kName').value.trim(), seat = +$('#kSeat').value, birth = $('#kBirth').value, f = kidFields();
