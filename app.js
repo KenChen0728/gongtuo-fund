@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.19.9';
+const VERSION = '2026.11.19.11';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -85,7 +85,7 @@ const pre = (y, m) => N.code + y + String(m).padStart(2, '0');
 // 下一個憑證編號：保留號碼之後，最小的還沒用過的號碼（垃圾桶裡的也算用過；在垃圾桶「永久刪除」後才空出來）
 function nextNo(y = CY, m = CM, extra = []) {
   const p = pre(y, m), used = new Set([...S().vouchers.map(v => v.no), ...extra].filter(no => no.startsWith(p)).map(no => +no.slice(p.length) || 0));
-  let n = (+N.reserved || 0) + 1; while (used.has(n)) n++;
+  let n = Math.max(+N.reserved || 0, +monthDoc(y, m).vUsedTo || 0) + 1; while (used.has(n)) n++;   // 這個月手寫已經用到的號碼之後才開始
   return p + String(n).padStart(2, '0');
 }
 function sortPetty(list) { const key = x => x.voucher ? '0' + x.voucher : '1'; return list.slice().sort((a, b) => key(a).localeCompare(key(b)) || a.ym - b.ym || a.d - b.d); }
@@ -438,6 +438,9 @@ function render() {
   $('#brandName').innerHTML = `${esc(N.short)}公托經費${DEMO ? '<span class="demo-tag">範例</span>' : ''}`;
   $('#today').textContent = `民國 ${CY} 年 ${CM} 月`;
   $('#headExtra').innerHTML = '';
+  // 右上角：這個月下一張憑證的編號，點了到「憑證與列印」
+  const nx = $('#nextNo'); nx.hidden = !['home', 'inv', 'vou', 'staff', 'cash'].includes(view);
+  if (!nx.hidden) nx.innerHTML = `下一張<span class="nx-long">憑證</span> <b>${esc(nextNo(CY, CM))}</b>`;
   ({ home, inv: invView, fee, report, vou, cash, staff, trash, set, help })[view]();
   // 讀不到資料時，空白的地方不能寫成「沒有資料」
   if (netState.readError && view !== 'set' && view !== 'help') {
@@ -759,7 +762,8 @@ function vou() {
   $('#headExtra').innerHTML = monthNav('vou');
   $('#view').innerHTML = `
   <div class="tally"><span class="${unp.length ? 'warn' : ''}">還沒印<b>${unp.length}</b></span><span>一般紙／色紙<b>${unp.filter(isWB).length} / ${unp.filter(v => !isWB(v)).length}</b></span><span>下一個編號<b>${nextNo(y, m).slice(-2)}</b></span></div>
-  <div class="actions start"><button type="button" class="btn primary" id="printV" ${pr.length ? '' : 'aria-disabled="true"'}>列印憑證</button><button type="button" class="btn" id="exportBiz">匯出業務費明細（Excel）</button></div>
+  ${d.vUsedTo ? `<p class="hint" style="font-size:15px">這個月手寫的憑證已經用到 ${pre(y, m)}${String(d.vUsedTo).padStart(2, '0')}，系統從下一號開始。</p>` : ''}
+  <div class="actions start"><button type="button" class="btn primary" id="printV" ${pr.length ? '' : 'aria-disabled="true"'}>列印憑證</button><button type="button" class="btn" id="exportBiz">匯出業務費明細（Excel）</button><button type="button" class="btn" id="vStart">設定起始編號</button></div>
   <p class="hint">還沒印的會先勾好；印過的要補印，再自己勾起來。一頁印一張，先印委辦費（一般紙），再印其他經費來源（色紙）。01 到 ${String(N.reserved).padStart(2, '0')} 保留給${esc(N.firstItem)}和薪資。</p>
   ${pay.length ? `<details class="card pickbox"><summary>人事費（01–${String(pay.length + 1).padStart(2, '0')}，清冊另外製作）</summary><div class="list">
     <div class="row"><div class="main"><div class="title"><span class="amount">${pre(y, m)}01</span>　${esc(N.firstItem)}</div><div class="meta">${pill('委辦費-業務費')}</div></div><span class="amount">${fmt(d.supervisor ?? N.supervisor)}</span></div>
@@ -904,7 +908,7 @@ const HELP = [
   { id: 'start', t: '第一次使用', shot: 'set', steps: ['到「更多 → 設定」，打開「公托資料」，填主任姓名和計畫主持人（01 號受款人），按「儲存公托資料」。', '打開「員工名單」，一行一位，順序就是薪資憑證的編號（第一位是 02）。', '打開「委辦費預算」，依契約書填人事費、業務費總額和各細項。', '到「月費」按「＋ 新增幼兒」，輸入座號、姓名和生日。'] },
   { id: 'add', t: '輸入發票', shot: 'dlginv', steps: ['拿到發票就按「＋ 新增發票」。', '代墊人預設是主任；付給廠商的選「付給廠商」並填廠商名稱。', '年、月已帶好，選日期、類別，填品名、數量和單價。經費來源會依類別自動帶出。', '不習慣一個畫面填很多欄位，可以在「本月」或「設定」改成一步一步模式。'] },
   { id: 'merge', t: '合併成憑證', shot: 'merge', steps: ['到「發票」，還沒做憑證的發票會照「類別＋付款對象」分組，同一組就能合成一張憑證。', '按組名右邊的「全選這組」，或自己勾選要合併的幾張。', '按下方「合併成憑證」，編號、受款人、經費來源、用途說明、金額都會自動帶入。', '需要時可以改用途說明，或加一行備註（會印在簽章欄下方）。', '建立憑證需要網路，避免兩台裝置用到同一個編號。'] },
-  { id: 'print', t: '列印憑證', shot: 'print', steps: ['到「更多 → 憑證與列印」，按「列印憑證」。', '還沒印的會先勾好；要補印的，在「要印哪幾張」清單自己勾起來。', '先印第 1 批委辦費（一般紙），再印第 2 批其他經費來源（色紙），畫面會說要放幾張色紙。', '可以左右滑動或按「上一張／下一張」看每一張。', '印出後才發現發票金額錯了：按那張憑證的「修改」，選要改的發票，改好後憑證金額、結報清單和年度報表會一起更新，編號不變。紙本手改就好，不一定要重印。'] },
+  { id: 'print', t: '列印憑證', shot: 'print', steps: ['到「更多 → 憑證與列印」，按「列印憑證」。', '還沒印的會先勾好；要補印的，在「要印哪幾張」清單自己勾起來。', '先印第 1 批委辦費（一般紙），再印第 2 批其他經費來源（色紙），畫面會說要放幾張色紙。', '可以左右滑動或按「上一張／下一張」看每一張。', '這個月有在系統之外先做過憑證（手寫、Excel）：按「設定起始編號」填已經用到第幾號，系統從下一號接著編。頁面右上角的「下一張憑證」隨時顯示下一張的編號。', '印出後才發現發票金額錯了：按那張憑證的「修改」，選要改的發票，改好後憑證金額、結報清單和年度報表會一起更新，編號不變。紙本手改就好，不一定要重印。'] },
   { id: 'cash', t: '零用金結算', shot: 'cash', steps: ['每月兩次，到「更多 → 零用金結算」。', '清單列主任代墊的發票，還有生日禮金、考核獎金（主任代墊），照憑證編號排列，會計可以拿著憑證依序對帳。', '預設全部勾選；這次只要結算其中幾張，把其他的勾勾拿掉，沒勾的會留到下一次。', '按「結算到今天」。還有發票沒做憑證、憑證沒印的，會先提醒你。', '結算過的清單在下方「已結算」，可以再列印；結算後才發現問題，按「退回」，發票回到本期改好再重新結算。'] },
   { id: 'staff', t: '人事費', shot: 'staff', steps: ['薪資清冊做好後，到「更多 → 人事費」。', '每位員工填這個月的金額，經費來源預設委辦費-人事費。', '委辦人事費不夠時，按那位員工的「拆單」，填委辦費付多少，其餘自動改由營運收入支應。', '按「儲存本月人事費」。員工的生日月份在「設定 → 員工名單」填好，生日那個月儲存人事費時會自動建立生日禮金（預設 500 元），首頁也會提醒。', '生日禮金、考核獎金和外聘督導費的憑證，按「列印」會先填領款收據（日期、姓名、服務單位等；地址和身分證字號可以留空給領款人手寫，填了也不會存起來），印成上面粘存單、下面領款收據。', '考核獎金：打開「考核獎金（一次填所有員工）」，選期別，每位員工選等第（優等 5,000、甲等 3,000 會自動帶入，可改），按「建立考核獎金憑證」。', '12 月會多一區「年度年終獎金」，每位員工直接填金額，按「建立年終獎金憑證」一次做好。代班薪資和其他月份的生日禮金、年終獎金在下方「其他人事支出」新增。'] },
   { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。餐點費看孩子到當月 1 號滿幾個月：未滿 6 個月不收、未滿 1 歲 300 元、滿 1 歲 600 元。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。月費、餐點費預設系統算，要改金額就在「修改」裡的「月費」「餐點費」欄填數字，清空就回到系統算的。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變；每年 1 月從 001 號重新開始。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。', '收據日期在頁面最上面，預設每月 15 號（遇週末順延），每個月可以自己改；預設幾號在「設定 → 收據」改，優化比、契約價金也可以設不同的預設日。', '只想先印幾張：按「勾選收據」，勾選要印的（可以全選、全部不選），按「列印勾選的」；沒勾的之後再印。', '有幾張要用不同的日期：一樣按「勾選收據」，勾選後在下方選日期，按「套用日期」。', '頁面下方「請款收據」：1、4、7、10 月會出現優化比（繳款人預設屏東縣政府；1 月是前一年第四期），1、2、7、10 月會出現契約價金（繳款人預設協會）。按「填寫」確認金額、貼上摘要，再按「列印」。其他要開的收據按「＋ 其他收據」。'] },
@@ -1798,6 +1802,7 @@ document.addEventListener('click', e => {
     return toast(r && r.no ? `已刪除收據 ${rcptNo(r.no)}。這個號碼不會再用到，紙本請註明作廢。` : '已刪除收據。', () => { store.set('months', ymKey(y, m), { y, m, xr: { [id]: r } }).catch(fail()); toast('已復原') });
   }
   if (t.id === 'rDateReset') { const { y, m } = SEL_M.fee; store.set('months', ymKey(y, m), { y, m, rcptDate: null }).catch(fail()); const r = autoReceiptDate(y, m); return toast(`${m} 月收據日期改回 ${r.m}/${r.d}。`) }
+  if (t.id === 'nextNo') { SEL_M.vou = { y: CY, m: CM }; return go('vou') }
   if (t.dataset.printv) return printVoucher(S().vouchers.find(x => x.no === t.dataset.printv));
   if (t.dataset.cancelv) {
     const v = S().vouchers.find(x => x.no === t.dataset.cancelv);
@@ -1877,6 +1882,18 @@ document.addEventListener('click', e => {
     case 'updateBtn': return location.reload();
     case 'selClear': sel.clear(); return render();
     case 'selMerge': if (t.getAttribute('aria-disabled') === 'true') return toast('只有同一類別、同一個付款對象的發票可以合併。'); return openMerge();
+    case 'vStart': {
+      const { y, m } = SEL_M.vou, d = monthDoc(y, m), cur = +d.vUsedTo || 0;
+      return ask(`${m} 月憑證起始編號`, `<p class="hint">這個月在系統之外（手寫、Excel）已經做過憑證的話，填最後用到的號碼，系統會從下一號接著編，不會重複。沒有就留空白。</p>
+        <label>這個月已經用到第幾號（${pre(y, m)}<b>__</b>）<input type="number" id="vUsed" inputmode="numeric" min="0" max="99" value="${cur || ''}" placeholder="例如 15"></label>`, () => {
+        const v = $('#vUsed').value === '' ? 0 : Math.floor(+$('#vUsed').value);
+        if (!(v >= 0 && v <= 99)) { toast('請填 0 到 99 的號碼。'); return false }
+        const clash = vouchersOf(y, m).filter(x => +x.no.slice(pre(y, m).length) <= v && +x.no.slice(pre(y, m).length) > (+N.reserved || 0));
+        store.set('months', ymKey(y, m), { y, m, vUsedTo: v }).catch(fail());
+        const used = new Set(vouchersOf(y, m).concat(S().vouchers.filter(x => x.deleted && x.y === y && x.m === m)).map(x => +x.no.slice(pre(y, m).length))); let nx = Math.max(v, +N.reserved || 0) + 1; while (used.has(nx)) nx++;
+        toast(v ? `已設定，${m} 月下一張憑證從 ${pre(y, m)}${String(nx).padStart(2, '0')} 開始。${clash.length ? `注意：系統裡已經有 ${clash.map(x => x.no).join('、')}，號碼和手寫的重疊，請確認。` : ''}` : '已清除，從保留號碼之後開始編。');
+      }, '儲存');
+    }
     case 'printV': if (t.getAttribute('aria-disabled') === 'true') return toast('這個月還沒有憑證可以印。'); return startVoucherPrint();
     case 'cashAll': { const po = pettyOpen(), allOn = po.every(x => !cashOff.has(x.id)); po.forEach(x => allOn ? cashOff.add(x.id) : cashOff.delete(x.id)); return render() }
     case 'settle': {
