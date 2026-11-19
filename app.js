@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.19.7';
+const VERSION = '2026.11.19.8';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -65,14 +65,14 @@ const isWB = v => v.src === '委辦費-業務費' || v.src === '委辦費-人事
 /* ===== 資料查詢 ===== */
 const invoices = () => S().invoices.filter(x => !x.deleted);
 const openInv = () => invoices().filter(x => !x.voucher);
-// 零用金本期：主任代墊的發票，加上生日禮金（主任代墊的人事憑證，沒有發票，用憑證本身列進清單）
+// 零用金本期：主任代墊的發票，加上生日禮金、考核獎金（主任代墊的人事憑證，沒有發票，用憑證本身列進清單）
 const isBdayV = v => v.kind === 'hr' && (v.hrType === 'bday' || /生日禮金/.test(v.desc || ''));
 function bdayPetty(v) {
   const dt = new Date(v.createdAt || Date.now()), same = dt.getFullYear() - 1911 === v.y && dt.getMonth() + 1 === v.m;
-  const [c, ...rest] = (v.desc || '').split('-'), old = rest.length && c === '員工福利';
-  return { id: 'v:' + v.no, isV: true, vno: v.no, payer: '主任', y: v.y, m: v.m, d: same ? dt.getDate() : 1, ym: v.ym, cat: '員工福利', desc: old ? rest.join('-') : v.desc, qty: 1, price: +v.amount || 0, voucher: v.no };
+  const [c, ...rest] = (v.desc || '').split('-'), old = rest.length && c === '員工福利', merit = isMeritV(v);
+  return { id: 'v:' + v.no, isV: true, vno: v.no, payer: '主任', y: v.y, m: v.m, d: same ? dt.getDate() : 1, ym: v.ym, cat: merit ? '考核獎金' : '員工福利', desc: merit ? `${v.meritPeriod || ''}考核獎金（${v.payee}）` : old ? rest.join('-') : v.desc, qty: 1, price: +v.amount || 0, voucher: v.no };
 }
-const pettyOpen = () => [...invoices().filter(x => x.payer === '主任' && !x.settled), ...vouchers().filter(v => isBdayV(v) && !v.settled).map(bdayPetty)];
+const pettyOpen = () => [...invoices().filter(x => x.payer === '主任' && !x.settled), ...vouchers().filter(v => (isBdayV(v) || isMeritV(v)) && !v.settled).map(bdayPetty)];
 const vouchers = () => S().vouchers.filter(v => !v.deleted);
 const vouchersOf = (y, m) => vouchers().filter(v => v.y === y && v.m === m);
 // 要附「領款收據」的憑證：生日禮金、考核獎金（人事憑證），外聘督導費（發票合併的憑證）
@@ -784,7 +784,7 @@ function cash() {
   const done = S().settlements.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   $('#view').innerHTML = `
   <div class="tally"><span>本期合計<b>${fmt(pt)}</b></span><span>代墊金<b>${fmt(N.petty)}</b></span><span class="${N.petty - pt < 5000 ? 'bad' : ''}">餘額<b>${fmt(N.petty - pt)}</b></span></div>
-  <section><h2>本期<small>${po.length} 張，主任代墊的發票和生日禮金</small></h2>
+  <section><h2>本期<small>${po.length} 張，主任代墊的發票、生日禮金和考核獎金</small></h2>
   <p class="hint">照憑證編號排列，會計可以拿著憑證依序對帳；還沒做憑證的排在最後。預設全部勾選；這次先不結算的，把勾勾拿掉，會留到下一次。</p>
   ${po.length ? `<div class="actions start" style="align-items:center"><button type="button" class="btn" id="cashAll">${allOn ? '全部不選' : '全部勾選'}</button><span class="meta" style="margin:0">已勾選 ${pk.length} 張，共 ${fmt(pkt)} 元</span></div>
   <div class="list">${po.map(x => `<div class="row"><button type="button" class="tick" role="checkbox" aria-checked="${!cashOff.has(x.id)}" data-cashsel="${x.id}" aria-label="結算 ${esc(x.desc)}"><i>✓</i>結算</button><div class="main"><div class="title">${esc(x.cat)}${x.cat === '幼兒食材' ? '' : '：' + esc(x.desc)}</div><div class="meta"><span>${x.m}/${x.d}</span>${x.qty > 1 ? `<span>${x.qty} × ${fmt(x.price)}</span>` : ''}${x.voucher ? `<span class="pill p-done">${esc(x.voucher)}</span>` : '<span class="pill p-todo">還沒做憑證</span>'}</div></div><span class="amount">${fmt(amt(x))}</span></div>`).join('')}</div>
@@ -903,7 +903,7 @@ const HELP = [
   { id: 'add', t: '輸入發票', shot: 'dlginv', steps: ['拿到發票就按「＋ 新增發票」。', '代墊人預設是主任；付給廠商的選「付給廠商」並填廠商名稱。', '年、月已帶好，選日期、類別，填品名、數量和單價。經費來源會依類別自動帶出。', '不習慣一個畫面填很多欄位，可以在「本月」或「設定」改成一步一步模式。'] },
   { id: 'merge', t: '合併成憑證', shot: 'merge', steps: ['到「發票」，還沒做憑證的發票會照「類別＋付款對象」分組，同一組就能合成一張憑證。', '按組名右邊的「全選這組」，或自己勾選要合併的幾張。', '按下方「合併成憑證」，編號、受款人、經費來源、用途說明、金額都會自動帶入。', '需要時可以改用途說明，或加一行備註（會印在簽章欄下方）。', '建立憑證需要網路，避免兩台裝置用到同一個編號。'] },
   { id: 'print', t: '列印憑證', shot: 'print', steps: ['到「更多 → 憑證與列印」，按「列印憑證」。', '還沒印的會先勾好；要補印的，在「要印哪幾張」清單自己勾起來。', '先印第 1 批委辦費（一般紙），再印第 2 批其他經費來源（色紙），畫面會說要放幾張色紙。', '可以左右滑動或按「上一張／下一張」看每一張。', '印出後才發現發票金額錯了：按那張憑證的「修改」，選要改的發票，改好後憑證金額、結報清單和年度報表會一起更新，編號不變。紙本手改就好，不一定要重印。'] },
-  { id: 'cash', t: '零用金結算', shot: 'cash', steps: ['每月兩次，到「更多 → 零用金結算」。', '清單列主任代墊的發票，還有生日禮金（主任代墊），照憑證編號排列，會計可以拿著憑證依序對帳。', '預設全部勾選；這次只要結算其中幾張，把其他的勾勾拿掉，沒勾的會留到下一次。', '按「結算到今天」。還有發票沒做憑證、憑證沒印的，會先提醒你。', '結算過的清單在下方「已結算」，可以再列印；結算後才發現問題，按「退回」，發票回到本期改好再重新結算。'] },
+  { id: 'cash', t: '零用金結算', shot: 'cash', steps: ['每月兩次，到「更多 → 零用金結算」。', '清單列主任代墊的發票，還有生日禮金、考核獎金（主任代墊），照憑證編號排列，會計可以拿著憑證依序對帳。', '預設全部勾選；這次只要結算其中幾張，把其他的勾勾拿掉，沒勾的會留到下一次。', '按「結算到今天」。還有發票沒做憑證、憑證沒印的，會先提醒你。', '結算過的清單在下方「已結算」，可以再列印；結算後才發現問題，按「退回」，發票回到本期改好再重新結算。'] },
   { id: 'staff', t: '人事費', shot: 'staff', steps: ['薪資清冊做好後，到「更多 → 人事費」。', '每位員工填這個月的金額，經費來源預設委辦費-人事費。', '委辦人事費不夠時，按那位員工的「拆單」，填委辦費付多少，其餘自動改由營運收入支應。', '按「儲存本月人事費」。員工的生日月份在「設定 → 員工名單」填好，生日那個月儲存人事費時會自動建立生日禮金（預設 500 元），首頁也會提醒。', '生日禮金、考核獎金和外聘督導費的憑證，按「列印」會先填領款收據（日期、姓名、服務單位等；地址和身分證字號可以留空給領款人手寫，填了也不會存起來），印成上面粘存單、下面領款收據。', '考核獎金：打開「考核獎金（一次填所有員工）」，選期別，每位員工選等第（優等 5,000、甲等 3,000 會自動帶入，可改），按「建立考核獎金憑證」。', '12 月會多一區「年度年終獎金」，每位員工直接填金額，按「建立年終獎金憑證」一次做好。代班薪資和其他月份的生日禮金、年終獎金在下方「其他人事支出」新增。'] },
   { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。餐點費看孩子到當月 1 號滿幾個月：未滿 6 個月不收、未滿 1 歲 300 元、滿 1 歲 600 元。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變；每年 1 月從 001 號重新開始。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。', '收據日期在頁面最上面，預設每月 15 號（遇週末順延），每個月可以自己改；預設幾號在「設定 → 收據」改，優化比、契約價金也可以設不同的預設日。', '只想先印幾張：按「勾選收據」，勾選要印的（可以全選、全部不選），按「列印勾選的」；沒勾的之後再印。', '有幾張要用不同的日期：一樣按「勾選收據」，勾選後在下方選日期，按「套用日期」。', '頁面下方「請款收據」：1、4、7、10 月會出現優化比（繳款人預設屏東縣政府；1 月是前一年第四期），1、2、7、10 月會出現契約價金（繳款人預設協會）。按「填寫」確認金額、貼上摘要，再按「列印」。其他要開的收據按「＋ 其他收據」。'] },
   { id: 'report', t: '報表', shot: 'report', steps: ['「年度經費報表」照每月報表的格式，自動算每月收入、支出、損益，和委辦費、行管費用了幾 %。', '優化比、提升托育品質、縣府補助款到帳時，按「＋ 新增撥款收入」；補助款要選期別（第一期、第二期⋯），每一期各一列。', '按「列印（A4 橫式）」印一頁；按「匯出 Excel」下載和原本格式一樣的 Excel（標楷體、顏色、公式）。', '委辦業務費有項目快用完或超支時，報表頁會列出「不夠用的項目」，按「補足」選要從哪一項轉出、金額，業務費總額不變；挪用紀錄可以還原。', '系統啟用前的月份，按「從 Excel 補登」選原本的經費明細檔，核對數字後按「補登」。補登之後才在系統新增的憑證、撥款收入會自動加上去；Excel 那個月沒有月費的，用系統算的月費。要交縣府時按「產出核銷報表」。'] },
@@ -1545,7 +1545,7 @@ function meritSection(y, m) {
    <label>考核期別<select id="meritPer">${[y - 1, y].flatMap(yy => [`${yy}年度上半年`, `${yy}年度下半年`]).map(o => `<option ${o === per ? 'selected' : ''}>${o}</option>`).join('')}</select></label>
    <div class="list paylist">${staffs.map((n, i) => { const v = meritOf(per, n), dr = meritDraft[n] || {}; return `<div class="row"><div class="main"><div class="title">${esc(n)}</div><div class="meta">${v ? `<span class="pill p-done">${esc(v.no)}</span><span>${esc(v.meritGrade || '')}</span>` : `<select data-mgrade="${i}" aria-label="${esc(n)} 考核等第" style="width:auto">${opts.map(o => `<option value="${o}" ${o === (dr.g || '') ? 'selected' : ''}>${o || '等第'}</option>`).join('')}</select>`}</div></div>${v ? `<span class="amount">${fmt(v.amount)}</span>` : `<label class="payamt">金額<input type="number" inputmode="numeric" data-mamt="${i}" value="${esc(dr.a ?? '')}"></label>`}</div>` }).join('')}</div>
    <div class="actions start"><button type="button" class="btn primary" id="meritMake">建立考核獎金憑證</button></div>
-   <p class="hint" style="font-size:14px">選等第會帶入金額（優等 5,000、甲等 3,000，可以改）。金額空白或 0 的不會建立。經費來源：營運收入支應-人事費。每張都會附領款收據。</p></details>`;
+   <p class="hint" style="font-size:14px">選等第會帶入金額（優等 5,000、甲等 3,000，可以改）。金額空白或 0 的不會建立。經費來源：營運收入支應-人事費。每張都會附領款收據，也會列進零用金結報清單（主任代墊）。</p></details>`;
 }
 const bonusData = (y, name, a) => ({ payee: name, src: '營運收入支應-年終獎金', desc: `${y}年度年終獎金(${name})`, amount: a, hrType: 'bonus' });
 
@@ -1884,7 +1884,7 @@ document.addEventListener('click', e => {
         <div class="list">${noV.length ? `<button type="button" class="row linkrow" data-go="inv"><div class="main"><div class="title">${noV.length} 張發票還沒做憑證</div><div class="meta">${noV.map(x => esc(x.cat === '幼兒食材' ? '幼兒食材' : x.desc)).join('、')}</div></div><span class="go" aria-hidden="true">›</span></button>` : ''}
         ${unp.length ? `<button type="button" class="row linkrow" data-go="vou"><div class="main"><div class="title">${unp.length} 張憑證還沒印</div><div class="meta">${unp.map(v => esc(v.no)).join('、')}</div></div><span class="go" aria-hidden="true">›</span></button>` : ''}</div>
         <p class="hint" style="font-size:15px">按上面的項目可以直接去處理。確定這次先不處理，再按「仍要結算」。</p>`, doSettle, '仍要結算', 'btn');
-      return ask('結算到今天', `<p class="hint">會把勾選的 ${po.length} 張主任代墊（發票和生日禮金）結成 ${CM} 月第 ${nextSettleN()} 次結報清單，合計 ${fmt(total)} 元。${rest ? `沒勾選的 ${rest} 張留在本期，下次再結算。` : '結算後清單會清空，重新累計。'}</p>`, doSettle, '結算');
+      return ask('結算到今天', `<p class="hint">會把勾選的 ${po.length} 張主任代墊（發票、生日禮金、考核獎金）結成 ${CM} 月第 ${nextSettleN()} 次結報清單，合計 ${fmt(total)} 元。${rest ? `沒勾選的 ${rest} 張留在本期，下次再結算。` : '結算後清單會清空，重新累計。'}</p>`, doSettle, '結算');
     }
     case 'printCash': return openPreview({ title: '代墊金結報清單（本期，還沒結算）', pages: [cashSheet(pettyPicked(), '本期（尚未結算）', CY, CM)] });
     case 'printFood': { const { y, m } = SEL_M.food; return openPreview({ title: '食材費統計', pages: [foodSheet(y, m)] }) }
