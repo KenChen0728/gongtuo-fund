@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.19.1';
+const VERSION = '2026.11.19.2';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -259,8 +259,8 @@ function getAlerts() {
     const cur = payrollRows(CY, CM).filter(r => r.src === '委辦費-人事費').reduce((x, r) => x + (+r.amount || 0), 0);
     if (cur > 0 && remain < cur) a.push({ go: 'staff', t: `委辦人事費剩 ${fmt(remain)} 元，不夠支付本月薪資約 ${fmt(cur)} 元，這個月要拆單。` });
   }
-  const low = wbItems().filter(k => { const b = +(N.budget || {})[k] || 0, r = b - wbUsed(k); return b > 0 && r !== 0 && r < b * .1; });
-  if (low.length) a.push({ go: 'report', t: `委辦業務費有 ${low.length} 項快用完或超支：${low.join('、')}。請在核銷前決定要從哪一項挪用。` });
+  const low = lowItems();
+  if (low.length) a.push({ go: 'report', t: `委辦業務費有 ${low.length} 項快用完或超支：${low.join('、')}。到「報表」按「補足」，從還有餘額的項目挪過去。` });
   return a;
 }
 
@@ -641,6 +641,43 @@ function earlierUnprinted(y, m) {
   for (const d of Object.values(S().months)) if (ymNum(d.y, d.m) < ymNum(y, m) && d.y === y && !d.rcptPrinted && Object.keys(d.fees || {}).length) return d.m;
   return 0;
 }
+// 委辦業務費細項：剩餘、快用完（剩不到一成）或超支的項目
+const wbLeft = k => (+(N.budget || {})[k] || 0) - wbUsed(k);
+const lowItems = () => wbItems().filter(k => { const b = +(N.budget || {})[k] || 0, r = wbLeft(k); return r < 0 || (b > 0 && r !== 0 && r < b * .1); });
+const wbMoves = () => (N.wbMoves || []).filter(x => x.y === CY);
+// 挪用預算：從還有餘額的項目轉到不夠的項目，業務費總額不變
+function moveDialog(to) {
+  const items = wbItems(), dflt = to || lowItems().sort((a, b) => wbLeft(a) - wbLeft(b))[0] || items[0];
+  ask('挪用委辦業務費', `<div class="mvgrid"><label class="mv-to">轉入（不夠用的項目）<select id="mvTo">${items.map(k => `<option value="${esc(k)}" ${k === dflt ? 'selected' : ''}>${esc(k)}（剩 ${fmt(wbLeft(k))}）</option>`).join('')}</select></label>
+    <div class="mv-from"><div style="font-weight:700;margin-bottom:6px">從哪一項轉出<small class="meta" style="margin-left:8px">照餘額多到少排</small></div><div id="mvFrom" class="list"></div></div>
+    <label class="mv-amt">挪用金額（元）<input type="number" id="mvAmt" inputmode="numeric" min="1"></label>
+    <p class="err mv-err" id="mvErr" hidden></p>
+    <p class="hint mv-hint" style="font-size:14px;margin:0">業務費總額不變，只是兩項的預算互相調整。挪用紀錄留在「報表 → 委辦業務費細項」，可以還原。</p></div>`, () => {
+    const t = $('#mvTo').value, f = (document.querySelector('[name=mvFrom]:checked') || {}).value, a = Math.round(+$('#mvAmt').value || 0);
+    const err = m => { $('#mvErr').textContent = m; $('#mvErr').hidden = false; return false };
+    if (!f) return err('請選要從哪一項轉出。');
+    if (a <= 0) return err('請輸入挪用金額。');
+    if (a > wbLeft(f)) return err(`${f} 只剩 ${fmt(wbLeft(f))} 元，不夠轉出 ${fmt(a)} 元。`);
+    const B = { ...(N.budget || {}) }; B[f] = (+B[f] || 0) - a; B[t] = (+B[t] || 0) + a;
+    const rec = { id: Date.now().toString(36), y: CY, date: TODAY, from: f, to: t, amount: a };
+    store.setSettings({ budget: B, wbMoves: [...(N.wbMoves || []), rec] }).catch(fail());
+    toast(`已從${f}挪 ${fmt(a)} 元到${t}。`, () => undoMove(rec.id));
+  }, '挪用');
+  const fill = () => {
+    const t = $('#mvTo').value, need = Math.max(0, -wbLeft(t));
+    const src = items.filter(k => k !== t && wbLeft(k) > 0).sort((a, b) => wbLeft(b) - wbLeft(a));
+    $('#mvFrom').innerHTML = src.map((k, i) => `<label class="row check" style="margin:0"><input type="radio" name="mvFrom" value="${esc(k)}" ${i === 0 ? 'checked' : ''}><span class="main">${esc(k)}</span><span class="amount">剩 ${fmt(wbLeft(k))}</span></label>`).join('') || '<div class="row"><div class="main meta">其他項目都沒有餘額了。</div></div>';
+    const pick = () => { const f = (document.querySelector('[name=mvFrom]:checked') || {}).value; $('#mvAmt').value = need && f ? Math.min(need, wbLeft(f)) : ''; $('#mvErr').hidden = true };
+    $('#mvFrom').onchange = pick; pick();
+  };
+  $('#mvTo').onchange = fill; fill();
+}
+function undoMove(id) {
+  const r = (N.wbMoves || []).find(x => x.id === id); if (!r) return;
+  const B = { ...(N.budget || {}) }; B[r.from] = (+B[r.from] || 0) + r.amount; B[r.to] = (+B[r.to] || 0) - r.amount;
+  store.setSettings({ budget: B, wbMoves: (N.wbMoves || []).filter(x => x.id !== id) }).catch(fail());
+  toast(`已還原：${r.to}的 ${fmt(r.amount)} 元還給${r.from}。`);
+}
 function report() {
   const A = annual(CY), mu = manualUntil(CY);
   const wbB = +N.wbBizTotal || 0, wbU = wbBizUsed();
@@ -662,11 +699,13 @@ function report() {
    <div class="list">${inc.map(x => `<div class="row"><div class="main"><div class="title">${x.m} 月・${esc(x.source === '縣府補助款' && x.label ? x.label : x.source)}</div>${x.note ? `<div class="meta">${esc(x.note)}</div>` : ''}</div><span class="amount">${fmt(x.amount)}</span><button type="button" class="edit" data-delincome="${x.id}">刪除</button></div>`).join('') || `<div class="row"><div class="main meta">${mu ? `${mu + 1} 月起還沒有撥款收入。` : '今年還沒有撥款收入。'}</div></div>`}</div>
    <div class="actions start"><button type="button" class="btn" id="addIncome">＋ 新增撥款收入</button></div>
   </section>
-  <details class="card pickbox"><summary>委辦業務費細項（${wbItems().length} 項）</summary>
+  ${(() => { const low = lowItems(); return low.length ? `<section><h2>委辦業務費不夠用的項目<small>按「補足」從還有餘額的項目挪過去</small></h2><div class="list">${low.map(k => { const r = wbLeft(k); return `<div class="row"><div class="main"><div class="title">${esc(k)}</div><div class="meta"><span class="${r < 0 ? 'when-warn' : ''}">${r < 0 ? `超支 ${fmt(-r)} 元` : `只剩 ${fmt(r)} 元`}</span></div></div><button type="button" class="edit" data-move="${esc(k)}">補足</button></div>` }).join('')}</div></section>` : '' })()}
+  <details class="card pickbox" ${lowItems().length || wbMoves().length ? 'open' : ''}><summary>委辦業務費細項（${wbItems().length} 項）</summary>
   ${mu ? `<p class="hint" style="font-size:14px">1–${mu} 月是補登的總數，沒有分細項；細項的「已用」要在「設定 → 委辦費預算 → 啟用前已用」填各項目 1–${mu} 月用掉的金額。</p>` : ''}
   <div class="tablewrap"><table><thead><tr><th>項目</th><th class="num">預算</th><th class="num">已用</th><th class="num">剩餘</th><th style="min-width:120px">使用率</th></tr></thead>
   <tbody>${wbItems().map(k => { const u = wbUsed(k), b = +(N.budget || {})[k] || 0, p = pct(u, b), cls = p >= 100 ? 'bad' : p >= 90 ? 'warn' : ''; return `<tr><td>${k}</td><td class="num">${fmt(b)}</td><td class="num">${fmt(u)}</td><td class="num ${b - u < 0 ? 'neg' : ''}">${fmt(b - u)}</td><td><div class="kpibar ${cls}"><i style="width:${Math.min(p, 100)}%"></i></div><span class="meta" style="margin:0">${b ? p + '%' : '—'}</span></td></tr>` }).join('')}</tbody></table></div>
-  <div class="actions start"><button type="button" class="btn" data-go="set">調整預算或挪用</button></div></details>`;
+  ${wbMoves().length ? `<div style="font-weight:700">挪用紀錄</div><div class="list">${wbMoves().slice().reverse().map(x => `<div class="row"><div class="main"><div class="title">${esc(x.from)} → ${esc(x.to)}</div><div class="meta"><span>${esc(x.date)}</span></div></div><span class="amount">${fmt(x.amount)}</span><button type="button" class="edit" data-unmove="${esc(x.id)}">還原</button></div>`).join('')}</div>` : ''}
+  <div class="actions start"><button type="button" class="btn" data-move="">挪用預算</button><button type="button" class="btn" data-go="set">調整預算</button></div></details>`;
 }
 // 補登月份另外加了哪些：列給使用者核對
 function addedNote(y) {
@@ -785,7 +824,7 @@ function set() {
   <details class="card pickbox" ${!+N.wbBizTotal ? 'open' : ''}><summary>委辦費預算（每年 1/1 依契約書輸入）</summary>
    <div class="two"><label>委辦人事費<input type="number" id="sPB" inputmode="numeric" value="${N.wbPersonBudget || ''}"></label><label>系統啟用前已用的人事費<input type="number" id="sPU" inputmode="numeric" value="${N.wbPersonUsedBefore || ''}"></label></div>
    <div class="two"><label>委辦業務費總額<input type="number" id="sBT" inputmode="numeric" value="${N.wbBizTotal || ''}"></label><label>${CY}年度行管費<input type="number" id="sAdm" inputmode="numeric" value="${N.admBudget || ''}"></label></div>
-   <p class="hint" style="font-size:14px">各細項預算加總要等於業務費總額。年中要挪用時，直接改兩個項目的預算即可。「啟用前已用」只有今年開始使用系統前已經花掉的金額要填。</p>
+   <p class="hint" style="font-size:14px">各細項預算加總要等於業務費總額。年中要挪用時，到「報表 → 委辦業務費細項」按「挪用預算」，會留下紀錄；也可以直接改兩個項目的預算。「啟用前已用」只有今年開始使用系統前已經花掉的金額要填。</p>
    <div class="tablewrap bgrid"><table><thead><tr><th>項目</th><th>預算</th><th>啟用前已用</th></tr></thead><tbody>
     ${wbItems().map((k, i) => `<tr><td>${k}</td><td><input type="number" inputmode="numeric" data-bud="${i}" value="${B[k] || ''}"></td><td><input type="number" inputmode="numeric" data-used="${i}" value="${U[k] || ''}"></td></tr>`).join('')}
    </tbody><tfoot><tr><td>細項合計</td><td id="bSum">${fmt(bsum)}</td><td></td></tr></tfoot></table></div>
@@ -822,7 +861,7 @@ const HELP = [
   { id: 'cash', t: '零用金結算', shot: 'cash', steps: ['每月兩次，到「更多 → 零用金結算」。', '清單只列主任代墊的發票，照憑證編號排列，會計可以拿著憑證依序對帳。', '按「結算到今天」。還有發票沒做憑證、憑證沒印的，會先提醒你。', '結算過的清單在下方「已結算」，可以再列印。'] },
   { id: 'staff', t: '人事費', shot: 'staff', steps: ['薪資清冊做好後，到「更多 → 人事費」。', '每位員工填這個月的金額，經費來源預設委辦費-人事費。', '委辦人事費不夠時，按那位員工的「拆單」，填委辦費付多少，其餘自動改由營運收入支應。', '按「儲存本月人事費」。生日禮金、代班薪資、年終獎金在下方新增。'] },
   { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。餐點費看孩子到當月 1 號滿幾個月：未滿 6 個月不收、未滿 1 歲 300 元、滿 1 歲 600 元。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變；每年 1 月從 001 號重新開始。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。', '收據日期在頁面最上面，預設每月 15 號（遇週末順延），每個月可以自己改；預設幾號在「設定 → 收據」改，優化比、契約價金也可以設不同的預設日。', '有幾張要用不同的日期：按「勾選改日期」，像發票一樣勾選收據，在下方選日期後按「套用日期」。', '頁面下方「請款收據」：1、4、7、10 月會出現優化比（繳款人預設屏東縣政府；1 月是前一年第四期），1、2、7、10 月會出現契約價金（繳款人預設協會）。按「填寫」確認金額、貼上摘要，再按「列印」。其他要開的收據按「＋ 其他收據」。'] },
-  { id: 'report', t: '報表', shot: 'report', steps: ['「年度經費報表」照每月報表的格式，自動算每月收入、支出、損益，和委辦費、行管費用了幾 %。', '優化比、提升托育品質、縣府補助款到帳時，按「＋ 新增撥款收入」；補助款要選期別（第一期、第二期⋯），每一期各一列。', '按「列印（A4 橫式）」印一頁；按「匯出 Excel」下載和原本格式一樣的 Excel（標楷體、顏色、公式）。', '系統啟用前的月份，按「從 Excel 補登」選原本的經費明細檔，核對數字後按「補登」。補登之後才在系統新增的憑證、撥款收入會自動加上去；Excel 那個月沒有月費的，用系統算的月費。要交縣府時按「產出核銷報表」。'] },
+  { id: 'report', t: '報表', shot: 'report', steps: ['「年度經費報表」照每月報表的格式，自動算每月收入、支出、損益，和委辦費、行管費用了幾 %。', '優化比、提升托育品質、縣府補助款到帳時，按「＋ 新增撥款收入」；補助款要選期別（第一期、第二期⋯），每一期各一列。', '按「列印（A4 橫式）」印一頁；按「匯出 Excel」下載和原本格式一樣的 Excel（標楷體、顏色、公式）。', '委辦業務費有項目快用完或超支時，報表頁會列出「不夠用的項目」，按「補足」選要從哪一項轉出、金額，業務費總額不變；挪用紀錄可以還原。', '系統啟用前的月份，按「從 Excel 補登」選原本的經費明細檔，核對數字後按「補登」。補登之後才在系統新增的憑證、撥款收入會自動加上去；Excel 那個月沒有月費的，用系統算的月費。要交縣府時按「產出核銷報表」。'] },
   { id: 'trash', t: '刪錯了怎麼辦', shot: 'trash', steps: ['刪除的發票、取消的憑證會在「更多 → 垃圾桶」放 30 天。', '按「救回」就回到原本的地方，任何一台裝置都能救。', '剛刪掉時，畫面下方的提示也有「復原」可以按。', '憑證做錯想沿用同一個編號：先取消憑證，再到垃圾桶按「永久刪除」，下一張新做的憑證就會用這個編號。'] },
   { id: 'backup', t: '備份與還原', shot: 'backup', steps: ['建議每個月到「更多 → 設定 → 備份」按「下載備份」，存到電腦。', '萬一資料被改錯，按「從備份還原」，選那個備份檔。', '還原前會先自動下載一份目前的資料，還原錯了還能再還原回來。', '備份之後才新增的資料不會被刪掉。', '管理者每月 25 號起會看到提醒，到「設定 → 備份」按「一次下載四間」，會下載四間的每月報表（Excel）和備份（還原用）兩個檔案。還原時選這個四間的備份檔也可以，會自動取出目前這間。'] },
   { id: 'install', t: '安裝成 App', steps: ['iPhone、iPad：用 Safari 開啟，按分享 →「加入主畫面」。', 'Android：用 Chrome 開啟，按右上選單 →「加到主畫面」或「安裝應用程式」。', '電腦（Windows、Mac、Chromebook）：用 Chrome 或 Edge 開啟，按網址列右邊的安裝圖示。', '從 LINE 點開的話，請先選「用預設瀏覽器開啟」，登入才會留下來。'] },
@@ -1612,6 +1651,8 @@ document.addEventListener('click', e => {
       toast(`已永久刪除，下一張${v.m} 月憑證會用 ${v.no}。`);
     }, '永久刪除', 'btn danger');
   }
+  if (t.dataset.move != null) return moveDialog(t.dataset.move);
+  if (t.dataset.unmove) { const r = (N.wbMoves || []).find(x => x.id === t.dataset.unmove); if (!r) return; return ask('還原挪用', `<p class="hint">把${esc(r.to)}的 ${fmt(r.amount)} 元還給${esc(r.from)}？${wbLeft(r.to) < r.amount ? `還原後${esc(r.to)}會超支 ${fmt(r.amount - wbLeft(r.to))} 元。` : ''}</p>`, () => undoMove(r.id), '還原') }
   if (t.dataset.restorei) { store.update('invoices', t.dataset.restorei, { deleted: false, deletedAt: null }).catch(fail()); toast('已救回這張發票。'); return }
   if (t.dataset.restorev) {
     const v = S().vouchers.find(x => x.no === t.dataset.restorev);

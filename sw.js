@@ -1,5 +1,5 @@
 // 先問網站有沒有新版（不用瀏覽器暫存；3 秒內沒回應就用存好的版本），讓離線也能打開
-const CACHE = 'gongtuo-fund-2026.11.19.1';
+const CACHE = 'gongtuo-fund-2026.11.19.2';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'data.js', 'sample.js', 'xlsx.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-180.png', 'icons/icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' }))))); self.skipWaiting(); });
 self.addEventListener('activate', e => {
