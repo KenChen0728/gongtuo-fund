@@ -380,3 +380,10 @@ input[type=date]{font:16px var(--font);padding:8px;border:1px solid var(--line);
 .ptitle .pagename{white-space:nowrap}
 .grplab{margin:14px 4px 6px;font-size:15px;font-weight:700;color:var(--muted)}
 .grplab:first-child{margin-top:4px}
+/* 預覽縮放（電腦、平板）：放大後頁面在框內捲動，換頁用按鈕 */
+.pzoom{display:flex;align-items:center;gap:8px}
+.pzoom .pos{min-width:4.5em;text-align:center;font-weight:700;font-variant-numeric:tabular-nums}
+.pzoom #pvZOut,.pzoom #pvZIn{min-width:44px;font-size:20px;padding:0}
+.pzoom #pvZFit[aria-pressed=true]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.a4view.zoomed{touch-action:auto;user-select:auto;-webkit-user-select:auto}
+.a4view.zoomed .a4slot{overflow:auto;max-height:calc(100vh - 340px);justify-content:safe center}

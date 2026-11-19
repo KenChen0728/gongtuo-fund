@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.19.14';
+const VERSION = '2026.11.19.15';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -924,7 +924,7 @@ const HELP = [
   { id: 'start', t: '第一次使用', shot: 'set', steps: ['到「更多 → 設定」，打開「公托資料」，填主任姓名和計畫主持人（01 號受款人），按「儲存公托資料」。', '打開「員工名單」，一行一位，順序就是薪資憑證的編號（第一位是 02）。', '打開「委辦費預算」，依契約書填人事費、業務費總額和各細項。', '到「月費」按「＋ 新增幼兒」，輸入座號、姓名和生日。'] },
   { id: 'add', t: '輸入發票', shot: 'dlginv', steps: ['拿到發票就按「＋ 新增發票」。', '代墊人預設是主任；付給廠商的選「付給廠商」並填廠商名稱。', '年、月已帶好，選日期、類別，填品名、數量和單價。經費來源會依類別自動帶出。', '不習慣一個畫面填很多欄位，可以在「本月」或「設定」改成一步一步模式。'] },
   { id: 'merge', t: '合併成憑證', shot: 'merge', steps: ['到「發票」，還沒做憑證的發票會照「類別＋付款對象」分組，同一組就能合成一張憑證。要印色紙的（營運收入支應、提升托育品質）排上面，委辦費（一般紙）排下面。', '按組名右邊的「全選這組」，或自己勾選要合併的幾張。', '按下方「合併成憑證」，編號、受款人、經費來源、用途說明、金額都會自動帶入。', '需要時可以改用途說明，或加一行備註（會印在簽章欄下方）。', '建立憑證需要網路，避免兩台裝置用到同一個編號。'] },
-  { id: 'print', t: '列印憑證', shot: 'print', steps: ['到「更多 → 憑證與列印」，按「列印憑證」。', '還沒印的會先勾好；要補印的，在「要印哪幾張」清單自己勾起來。', '先印第 1 批委辦費（一般紙），再印第 2 批其他經費來源（色紙），畫面會說要放幾張色紙。', '可以左右滑動或按「上一張／下一張」看每一張。', '這個月有在系統之外先做過憑證（手寫、Excel）：按「設定起始編號」填已經用到第幾號，系統從下一號接著編。頁面右上角的「下一張憑證」隨時顯示下一張的編號。', '印出後才發現發票金額錯了：按那張憑證的「修改」，選要改的發票，改好後憑證金額、結報清單和年度報表會一起更新，編號不變。紙本手改就好，不一定要重印。'] },
+  { id: 'print', t: '列印憑證', shot: 'print', steps: ['到「更多 → 憑證與列印」，按「列印憑證」。', '還沒印的會先勾好；要補印的，在「要印哪幾張」清單自己勾起來。', '先印第 1 批委辦費（一般紙），再印第 2 批其他經費來源（色紙），畫面會說要放幾張色紙。', '可以左右滑動或按「上一張／下一張」看每一張。電腦和平板的預覽上方有「－ ＋」可以放大縮小，按「符合視窗」回到原本大小（手機不顯示，避免誤觸）。', '這個月有在系統之外先做過憑證（手寫、Excel）：按「設定起始編號」填已經用到第幾號，系統從下一號接著編。頁面右上角的「下一張憑證」隨時顯示下一張的編號。', '印出後才發現發票金額錯了：按那張憑證的「修改」，選要改的發票，改好後憑證金額、結報清單和年度報表會一起更新，編號不變。紙本手改就好，不一定要重印。'] },
   { id: 'cash', t: '零用金結算', shot: 'cash', steps: ['每月兩次，到「更多 → 零用金結算」。', '清單列主任代墊的發票，還有生日禮金、考核獎金（主任代墊），照憑證編號排列，會計可以拿著憑證依序對帳。', '預設全部勾選；這次只要結算其中幾張，把其他的勾勾拿掉，沒勾的會留到下一次。', '按「結算到今天」。還有發票沒做憑證、憑證沒印的，會先提醒你。', '結算過的清單在下方「已結算」，可以再列印；結算後才發現問題，按「退回」，發票回到本期改好再重新結算。'] },
   { id: 'staff', t: '人事費', shot: 'staff', steps: ['薪資清冊做好後，到「更多 → 人事費」。', '每位員工填這個月的金額，經費來源預設委辦費-人事費。', '委辦人事費不夠時，按那位員工的「拆單」，填委辦費付多少，其餘自動改由營運收入支應。', '按「儲存本月人事費」。員工的生日月份在「設定 → 員工名單」填好，生日那個月儲存人事費時會自動建立生日禮金（預設 500 元），首頁也會提醒。', '生日禮金、考核獎金和外聘督導費的憑證，按「列印」會先填領款收據（日期、姓名、服務單位等；地址和身分證字號可以留空給領款人手寫，填了也不會存起來），印成上面粘存單、下面領款收據。', '考核獎金：打開「考核獎金（一次填所有員工）」，選期別，每位員工選等第（優等 5,000、甲等 3,000 會自動帶入，可改），按「建立考核獎金憑證」。', '12 月會多一區「年度年終獎金」，每位員工直接填金額，按「建立年終獎金憑證」一次做好。代班薪資和其他月份的生日禮金、年終獎金在下方「其他人事支出」新增。'] },
   { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。餐點費看孩子到當月 1 號滿幾個月：未滿 6 個月不收、未滿 1 歲 300 元、滿 1 歲 600 元。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。備註會列在月費表下方，也會印在那位孩子的收據摘要裡。月費、餐點費預設系統算，要改金額就在「修改」裡的「月費」「餐點費」欄填數字，清空就回到系統算的。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變；每年 1 月從 001 號重新開始。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。', '收據日期在頁面最上面，預設每月 15 號（遇週末順延），每個月可以自己改；預設幾號在「設定 → 收據」改，優化比、契約價金也可以設不同的預設日。', '只想先印幾張：按「勾選收據」，勾選要印的（可以全選、全部不選），按「列印勾選的」；沒勾的之後再印。', '有幾張要用不同的日期：一樣按「勾選收據」，勾選後在下方選日期，按「套用日期」。', '頁面下方「請款收據」：1、4、7、10 月會出現優化比（繳款人預設屏東縣政府；1 月是前一年第四期），1、2、7、10 月會出現契約價金（繳款人預設協會）。按「填寫」確認金額、貼上摘要，再按「列印」。其他要開的收據按「＋ 其他收據」。'] },
@@ -1204,7 +1204,7 @@ function govSheet(f, t) {
 }
 
 /* ===== 預覽（一頁一張、可滑動） ===== */
-const PV = { pages: [], i: 0, onPrint: null };
+const PV = { pages: [], i: 0, onPrint: null, zoom: +ls.get('gongtuo.pvzoom') || 0 };   // zoom 0＝符合視窗；電腦、平板可以用按鈕放大縮小（記在這台裝置）
 // 列印用標楷體：電腦有內建標楷體就用；手機沒有，改用網路上的楷體（第一次預覽時才載入，不拖慢開啟）
 let kaiLoaded = false;
 function loadKai() {
@@ -1226,7 +1226,21 @@ function openPreview(o) {
   $('#pvStrip').innerHTML = PV.pages.length ? PV.pages.map(p => `<div class="a4slot"><div class="a4box"><div class="a4${PV.land ? ' land' : ''}">${p}</div></div></div>`).join('') : '<div class="a4slot"><div class="empty" style="margin:24px">這一批沒有勾選的頁面。</div></div>';
   pvFit(); pvGo(keep, false);
 }
-function pvFit() { const vp = $('#pvView'); if (!vp.clientWidth) return; const [w, h] = PV.land ? [1123, 794] : [794, 1123]; const s = Math.min(1, (vp.clientWidth - 24) / w, Math.max(300, innerHeight * .55) / h); vp.style.setProperty('--s', s.toFixed(4)) }
+const PV_STEPS = [.3, .4, .5, .6, .75, .9, 1, 1.25, 1.5];
+const pvZoomable = () => matchMedia('(min-width:700px)').matches;          // 手機不顯示縮放，避免誤觸
+function pvFitS() { const vp = $('#pvView'), [w, h] = PV.land ? [1123, 794] : [794, 1123]; return Math.min(1, (vp.clientWidth - 24) / w, Math.max(300, innerHeight - (pvZoomable() ? 300 : innerHeight * .45)) / h) }
+function pvFit() {
+  const vp = $('#pvView'); if (!vp.clientWidth) return;
+  const fit = pvFitS(), z = pvZoomable() && PV.zoom ? PV.zoom : 0, s = z || fit;
+  vp.style.setProperty('--s', s.toFixed(4)); vp.classList.toggle('zoomed', !!z && s > fit + .001);
+  $('#pvZoom').hidden = !pvZoomable(); $('#pvZLbl').textContent = `${Math.round(s * 100)}%`; $('#pvZFit').setAttribute('aria-pressed', String(!z));
+  $('#pvZOut').disabled = s <= PV_STEPS[0] + .001; $('#pvZIn').disabled = s >= PV_STEPS[PV_STEPS.length - 1] - .001;
+}
+function pvZoom(d) {
+  const cur = PV.zoom || pvFitS();
+  PV.zoom = d === 0 ? 0 : d > 0 ? (PV_STEPS.find(x => x > cur + .001) || PV_STEPS[PV_STEPS.length - 1]) : ([...PV_STEPS].reverse().find(x => x < cur - .001) || PV_STEPS[0]);
+  ls.set('gongtuo.pvzoom', String(PV.zoom)); pvFit(); pvGo(PV.i, false);
+}
 function pvGo(i, anim = true) {
   const n = PV.pages.length; PV.i = Math.max(0, Math.min(i, n - 1));
   const st = $('#pvStrip');
@@ -1239,7 +1253,8 @@ function pvGo(i, anim = true) {
 }
 (function () {
   const vp = $('#pvView'), st = $('#pvStrip'); let x0 = 0, y0 = 0, dx = 0, dir = null, t0 = 0, id = null;
-  vp.addEventListener('pointerdown', e => { if (PV.pages.length < 2) return; id = e.pointerId; x0 = e.clientX; y0 = e.clientY; dx = 0; dir = null; t0 = performance.now() });
+  // 放大時拖曳是捲動，換頁用按鈕
+  vp.addEventListener('pointerdown', e => { if (PV.pages.length < 2 || vp.classList.contains('zoomed')) return; id = e.pointerId; x0 = e.clientX; y0 = e.clientY; dx = 0; dir = null; t0 = performance.now() });
   vp.addEventListener('pointermove', e => {
     if (e.pointerId !== id) return;
     const mx = e.clientX - x0, my = e.clientY - y0;
@@ -1253,6 +1268,7 @@ function pvGo(i, anim = true) {
     if (Math.abs(dx) > w / 2 || (v > .5 && Math.abs(dx) > 40)) ni += dx < 0 ? 1 : -1; pvGo(ni) };
   vp.addEventListener('pointerup', end); vp.addEventListener('pointercancel', end);
   $('#pvPrev').onclick = () => pvGo(PV.i - 1); $('#pvNext').onclick = () => pvGo(PV.i + 1);
+  $('#pvZIn').onclick = () => pvZoom(1); $('#pvZOut').onclick = () => pvZoom(-1); $('#pvZFit').onclick = () => pvZoom(0);
   $('#dlgPrint').addEventListener('keydown', e => { if (e.key === 'ArrowLeft') pvGo(PV.i - 1); if (e.key === 'ArrowRight') pvGo(PV.i + 1) });
   addEventListener('resize', () => { if ($('#dlgPrint').open) { pvFit(); pvGo(PV.i, false) } });
 })();
