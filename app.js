@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.19.3';
+const VERSION = '2026.11.19.4';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -403,6 +403,7 @@ function maybeAlert(force) {
 const NAMES = { home: '本月', inv: '發票', fee: '月費與收據', report: '報表', vou: '憑證與列印', cash: '零用金結算', staff: '人事費', trash: '垃圾桶', set: '設定', help: '說明' };
 const IN_MORE = ['vou', 'cash', 'staff', 'trash', 'set', 'help'];
 let view = 'home', sel = new Set(), invFilter = 'all', cashTab = 'list';
+const cashOff = new Set();          // 本期沒勾選、這次先不結算的發票（預設全部勾選）
 const SEL_M = { vou: { y: CY, m: CM }, fee: { y: CY, m: CM }, staff: { y: CY, m: CM }, food: { y: CY, m: CM } };
 // 設定、人事費改到一半就要離開時，先問一下
 function leaveGuard(next) {
@@ -737,8 +738,11 @@ function vou() {
     <div class="meta">${pill(v.src)}<span>受款人：${esc(v.kind === 'inv' ? payeeLabel(v) : v.payee)}</span>${v.kind === 'inv' ? `${v.printed ? `<span class="pill p-done">已印 ${esc(v.printedAt)}</span>` : '<span class="pill p-todo">還沒印</span>'}<span>${isWB(v) ? '一般紙' : '色紙'}</span>` : '<span>另外製作</span>'}${v.note ? '<span>有備註</span>' : ''}${v.printed && v.amountPrinted != null && v.amountPrinted !== v.amount ? `<span class="when-warn">印後改過金額（紙本是 ${fmt(v.amountPrinted)}）</span>` : ''}</div></div>
     <span class="amount">${fmt(v.amount)}</span><div class="acts">${v.kind === 'inv' ? `<button type="button" class="edit" data-vinv="${esc(v.no)}">修改</button><button type="button" class="edit" data-printv="${esc(v.no)}">列印</button>` : ''}<button type="button" class="edit" data-cancelv="${esc(v.no)}">取消</button></div></div>`).join('')}</div>` : '<div class="empty">這個月還沒有憑證。到「發票」勾選發票，就能合併成憑證。</div>'}`;
 }
+const pettyPicked = () => sortPetty(pettyOpen()).filter(x => !cashOff.has(x.id));
+const nextSettleN = () => Math.max(0, ...S().settlements.filter(s => s.y === CY && s.m === CM).map(s => +s.n || 0)) + 1;
 function cash() {
   const po = sortPetty(pettyOpen()), pt = po.reduce((a, x) => a + amt(x), 0);
+  const pk = po.filter(x => !cashOff.has(x.id)), pkt = pk.reduce((a, x) => a + amt(x), 0), allOn = pk.length === po.length;
   $('#headExtra').innerHTML = `<div class="chips" role="group" aria-label="切換">${[['list', '代墊結報清單'], ['food', '食材費統計']].map(([k, t]) => `<button type="button" class="chip" aria-pressed="${cashTab === k}" data-cash="${k}">${t}</button>`).join('')}</div>`;
   if (cashTab === 'food') {
     const { y, m } = SEL_M.food;
@@ -753,12 +757,13 @@ function cash() {
   $('#view').innerHTML = `
   <div class="tally"><span>本期合計<b>${fmt(pt)}</b></span><span>代墊金<b>${fmt(N.petty)}</b></span><span class="${N.petty - pt < 5000 ? 'bad' : ''}">餘額<b>${fmt(N.petty - pt)}</b></span></div>
   <section><h2>本期<small>${po.length} 張，只列主任代墊的發票</small></h2>
-  <p class="hint">照憑證編號排列，會計可以拿著憑證依序對帳；還沒做憑證的排在最後。</p>
-  ${po.length ? `<div class="list">${po.map(x => `<div class="row"><div class="main"><div class="title">${esc(x.cat)}${x.cat === '幼兒食材' ? '' : '：' + esc(x.desc)}</div><div class="meta"><span>${x.m}/${x.d}</span>${x.qty > 1 ? `<span>${x.qty} × ${fmt(x.price)}</span>` : ''}${x.voucher ? `<span class="pill p-done">${esc(x.voucher)}</span>` : '<span class="pill p-todo">還沒做憑證</span>'}</div></div><span class="amount">${fmt(amt(x))}</span></div>`).join('')}</div>
-   <div class="actions start"><button type="button" class="btn primary" id="settle">結算到今天</button><button type="button" class="btn" id="printCash">預覽結報清單</button></div>` : '<div class="empty">本期還沒有主任代墊的發票。</div>'}
+  <p class="hint">照憑證編號排列，會計可以拿著憑證依序對帳；還沒做憑證的排在最後。預設全部勾選；這次先不結算的，把勾勾拿掉，會留到下一次。</p>
+  ${po.length ? `<div class="actions start" style="align-items:center"><button type="button" class="btn" id="cashAll">${allOn ? '全部不選' : '全部勾選'}</button><span class="meta" style="margin:0">已勾選 ${pk.length} 張，共 ${fmt(pkt)} 元</span></div>
+  <div class="list">${po.map(x => `<div class="row"><button type="button" class="tick" role="checkbox" aria-checked="${!cashOff.has(x.id)}" data-cashsel="${x.id}" aria-label="結算 ${esc(x.desc)}"><i>✓</i>結算</button><div class="main"><div class="title">${esc(x.cat)}${x.cat === '幼兒食材' ? '' : '：' + esc(x.desc)}</div><div class="meta"><span>${x.m}/${x.d}</span>${x.qty > 1 ? `<span>${x.qty} × ${fmt(x.price)}</span>` : ''}${x.voucher ? `<span class="pill p-done">${esc(x.voucher)}</span>` : '<span class="pill p-todo">還沒做憑證</span>'}</div></div><span class="amount">${fmt(amt(x))}</span></div>`).join('')}</div>
+   <div class="actions start"><button type="button" class="btn primary" id="settle" ${pk.length ? '' : 'aria-disabled="true"'}>${allOn ? '結算到今天' : `結算勾選的 ${pk.length} 張`}</button><button type="button" class="btn" id="printCash">預覽結報清單</button></div>` : '<div class="empty">本期還沒有主任代墊的發票。</div>'}
   </section>
   <section><h2>已結算</h2>
-   ${done.length ? `<div class="list">${done.map(s => `<div class="row"><div class="main"><div class="title">${s.m} 月第 ${s.n} 次結算・${esc(s.date)}</div><div class="meta">${s.rows.length} 張發票</div></div><span class="amount">${fmt(s.total)}</span><button type="button" class="edit" data-printset="${s.id}">列印</button></div>`).join('')}</div>` : '<div class="empty">還沒有結算紀錄。</div>'}
+   ${done.length ? `<div class="list">${done.map(s => `<div class="row"><div class="main"><div class="title">${s.m} 月第 ${s.n} 次結算・${esc(s.date)}</div><div class="meta">${s.rows.length} 張發票</div></div><span class="amount">${fmt(s.total)}</span><div class="acts"><button type="button" class="edit" data-printset="${s.id}">列印</button><button type="button" class="edit" data-unsettle="${s.id}">退回</button></div></div>`).join('')}</div><p class="hint" style="font-size:15px">結算後才發現問題：按「退回」，這次的發票會回到本期，改好再重新結算。</p>` : '<div class="empty">還沒有結算紀錄。</div>'}
   </section>`;
 }
 function staff() {
@@ -858,7 +863,7 @@ const HELP = [
   { id: 'add', t: '輸入發票', shot: 'dlginv', steps: ['拿到發票就按「＋ 新增發票」。', '代墊人預設是主任；付給廠商的選「付給廠商」並填廠商名稱。', '年、月已帶好，選日期、類別，填品名、數量和單價。經費來源會依類別自動帶出。', '不習慣一個畫面填很多欄位，可以在「本月」或「設定」改成一步一步模式。'] },
   { id: 'merge', t: '合併成憑證', shot: 'merge', steps: ['到「發票」，還沒做憑證的發票會照「類別＋付款對象」分組，同一組就能合成一張憑證。', '按組名右邊的「全選這組」，或自己勾選要合併的幾張。', '按下方「合併成憑證」，編號、受款人、經費來源、用途說明、金額都會自動帶入。', '需要時可以改用途說明，或加一行備註（會印在簽章欄下方）。', '建立憑證需要網路，避免兩台裝置用到同一個編號。'] },
   { id: 'print', t: '列印憑證', shot: 'print', steps: ['到「更多 → 憑證與列印」，按「列印憑證」。', '還沒印的會先勾好；要補印的，在「要印哪幾張」清單自己勾起來。', '先印第 1 批委辦費（一般紙），再印第 2 批其他經費來源（色紙），畫面會說要放幾張色紙。', '可以左右滑動或按「上一張／下一張」看每一張。', '印出後才發現發票金額錯了：按那張憑證的「修改」，選要改的發票，改好後憑證金額、結報清單和年度報表會一起更新，編號不變。紙本手改就好，不一定要重印。'] },
-  { id: 'cash', t: '零用金結算', shot: 'cash', steps: ['每月兩次，到「更多 → 零用金結算」。', '清單只列主任代墊的發票，照憑證編號排列，會計可以拿著憑證依序對帳。', '按「結算到今天」。還有發票沒做憑證、憑證沒印的，會先提醒你。', '結算過的清單在下方「已結算」，可以再列印。'] },
+  { id: 'cash', t: '零用金結算', shot: 'cash', steps: ['每月兩次，到「更多 → 零用金結算」。', '清單只列主任代墊的發票，照憑證編號排列，會計可以拿著憑證依序對帳。', '預設全部勾選；這次只要結算其中幾張，把其他的勾勾拿掉，沒勾的會留到下一次。', '按「結算到今天」。還有發票沒做憑證、憑證沒印的，會先提醒你。', '結算過的清單在下方「已結算」，可以再列印；結算後才發現問題，按「退回」，發票回到本期改好再重新結算。'] },
   { id: 'staff', t: '人事費', shot: 'staff', steps: ['薪資清冊做好後，到「更多 → 人事費」。', '每位員工填這個月的金額，經費來源預設委辦費-人事費。', '委辦人事費不夠時，按那位員工的「拆單」，填委辦費付多少，其餘自動改由營運收入支應。', '按「儲存本月人事費」。生日禮金、代班薪資、年終獎金在下方新增。'] },
   { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。餐點費看孩子到當月 1 號滿幾個月：未滿 6 個月不收、未滿 1 歲 300 元、滿 1 歲 600 元。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變；每年 1 月從 001 號重新開始。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。', '收據日期在頁面最上面，預設每月 15 號（遇週末順延），每個月可以自己改；預設幾號在「設定 → 收據」改，優化比、契約價金也可以設不同的預設日。', '有幾張要用不同的日期：按「勾選改日期」，像發票一樣勾選收據，在下方選日期後按「套用日期」。', '頁面下方「請款收據」：1、4、7、10 月會出現優化比（繳款人預設屏東縣政府；1 月是前一年第四期），1、2、7、10 月會出現契約價金（繳款人預設協會）。按「填寫」確認金額、貼上摘要，再按「列印」。其他要開的收據按「＋ 其他收據」。'] },
   { id: 'report', t: '報表', shot: 'report', steps: ['「年度經費報表」照每月報表的格式，自動算每月收入、支出、損益，和委辦費、行管費用了幾 %。', '優化比、提升托育品質、縣府補助款到帳時，按「＋ 新增撥款收入」；補助款要選期別（第一期、第二期⋯），每一期各一列。', '按「列印（A4 橫式）」印一頁；按「匯出 Excel」下載和原本格式一樣的 Excel（標楷體、顏色、公式）。', '委辦業務費有項目快用完或超支時，報表頁會列出「不夠用的項目」，按「補足」選要從哪一項轉出、金額，業務費總額不變；挪用紀錄可以還原。', '系統啟用前的月份，按「從 Excel 補登」選原本的經費明細檔，核對數字後按「補登」。補登之後才在系統新增的憑證、撥款收入會自動加上去；Excel 那個月沒有月費的，用系統算的月費。要交縣府時按「產出核銷報表」。'] },
@@ -1508,14 +1513,24 @@ $('#fAlert').addEventListener('submit', e => { if (!$('#alertOk').checked) { e.p
 
 /* ===== 結算 ===== */
 function doSettle() {
-  const po = sortPetty(pettyOpen());
-  const n = S().settlements.filter(s => s.y === CY && s.m === CM).length + 1;
+  const po = pettyPicked();
+  if (!po.length) return toast('請先勾選要結算的發票。');
+  const n = nextSettleN(), left = pettyOpen().length - po.length;
   const id = store.newId('settlements');
   const rows = po.map(x => ({ m: x.m, d: x.d, cat: x.cat, desc: x.desc, qty: x.qty, price: x.price, voucher: x.voucher || '' }));
   const total = po.reduce((a, x) => a + amt(x), 0);
   store.batch([{ c: 'settlements', id, data: { n, y: CY, m: CM, date: TODAY, ids: po.map(x => x.id), rows, total, createdAt: Date.now() }, merge: false },
   ...po.map(x => ({ c: 'invoices', id: x.id, update: { settled: id } }))]).catch(fail());
-  toast(`已結算 ${CM} 月第 ${n} 次，可以在「已結算」列印清單。`);
+  toast(`已結算 ${CM} 月第 ${n} 次，可以在「已結算」列印清單。${left ? `沒勾選的 ${left} 張留在本期。` : ''}`);
+}
+// 退回結算：刪掉這次的結報清單，發票回到本期
+function unsettle(id) {
+  const st = S().settlements.find(s => s.id === id); if (!st) return;
+  const ids = (st.ids || []).filter(i => S().invoices.some(x => x.id === i && x.settled === id));
+  ask(`退回 ${st.m} 月第 ${st.n} 次結算`, `<p class="hint">這次結算的 ${ids.length} 張發票（${fmt(st.total)} 元）會回到「本期」，可以修改、刪除後再重新結算。這張結報清單會刪除，已經印出的紙本請作廢。</p>${st.n < Math.max(...S().settlements.filter(s => s.y === st.y && s.m === st.m).map(s => +s.n || 0)) ? `<p class="hint">後面還有第 ${st.n + 1} 次以後的結算，退回後「第 ${st.n} 次」這個次數會空著。</p>` : ''}`, () => {
+    store.batch([{ c: 'settlements', id, remove: true }, ...ids.map(i => ({ c: 'invoices', id: i, update: { settled: null } }))]).catch(fail('沒有退回成功，請再試一次。'));
+    toast(`已退回，${ids.length} 張發票回到本期。`, () => { const { id: _, ...data } = st; store.batch([{ c: 'settlements', id, data, merge: false }, ...ids.map(i => ({ c: 'invoices', id: i, update: { settled: id } }))]).catch(fail()); toast('已復原') });
+  }, '退回', 'btn danger');
 }
 
 /* ===== 匯出、備份 ===== */
@@ -1664,6 +1679,8 @@ document.addEventListener('click', e => {
       toast(`已永久刪除，下一張${v.m} 月憑證會用 ${v.no}。`);
     }, '永久刪除', 'btn danger');
   }
+  if (t.dataset.cashsel) { const id = t.dataset.cashsel; cashOff.has(id) ? cashOff.delete(id) : cashOff.add(id); return render() }
+  if (t.dataset.unsettle) return unsettle(t.dataset.unsettle);
   if (t.dataset.move != null) return moveDialog(t.dataset.move);
   if (t.dataset.unmove) { const r = (N.wbMoves || []).find(x => x.id === t.dataset.unmove); if (!r) return; return ask('還原挪用', `<p class="hint">把${esc(r.to)}的 ${fmt(r.amount)} 元還給${esc(r.from)}？${wbLeft(r.to) < r.amount ? `還原後${esc(r.to)}會超支 ${fmt(r.amount - wbLeft(r.to))} 元。` : ''}</p>`, () => undoMove(r.id), '還原') }
   if (t.dataset.restorei) { store.update('invoices', t.dataset.restorei, { deleted: false, deletedAt: null }).catch(fail()); toast('已救回這張發票。'); return }
@@ -1726,17 +1743,19 @@ document.addEventListener('click', e => {
     case 'selClear': sel.clear(); return render();
     case 'selMerge': if (t.getAttribute('aria-disabled') === 'true') return toast('只有同一類別、同一個付款對象的發票可以合併。'); return openMerge();
     case 'printV': if (t.getAttribute('aria-disabled') === 'true') return toast('這個月還沒有憑證可以印。'); return startVoucherPrint();
+    case 'cashAll': { const po = pettyOpen(), allOn = po.every(x => !cashOff.has(x.id)); po.forEach(x => allOn ? cashOff.add(x.id) : cashOff.delete(x.id)); return render() }
     case 'settle': {
-      const po = pettyOpen(), noV = po.filter(x => !x.voucher);
+      if (t.getAttribute('aria-disabled') === 'true') return toast('請先勾選要結算的發票。');
+      const po = pettyPicked(), noV = po.filter(x => !x.voucher), rest = pettyOpen().length - po.length;
       const unp = [...new Set(po.filter(x => x.voucher).map(x => x.voucher))].map(no => S().vouchers.find(v => v.no === no)).filter(v => v && !v.printed);
       const total = po.reduce((a, x) => a + amt(x), 0);
       if (noV.length || unp.length) return ask('結算前請先確認', `<p class="hint">下面這些還沒處理，結算後就不容易補：</p>
         <div class="list">${noV.length ? `<button type="button" class="row linkrow" data-go="inv"><div class="main"><div class="title">${noV.length} 張發票還沒做憑證</div><div class="meta">${noV.map(x => esc(x.cat === '幼兒食材' ? '幼兒食材' : x.desc)).join('、')}</div></div><span class="go" aria-hidden="true">›</span></button>` : ''}
         ${unp.length ? `<button type="button" class="row linkrow" data-go="vou"><div class="main"><div class="title">${unp.length} 張憑證還沒印</div><div class="meta">${unp.map(v => esc(v.no)).join('、')}</div></div><span class="go" aria-hidden="true">›</span></button>` : ''}</div>
         <p class="hint" style="font-size:15px">按上面的項目可以直接去處理。確定這次先不處理，再按「仍要結算」。</p>`, doSettle, '仍要結算', 'btn');
-      return ask('結算到今天', `<p class="hint">會把 ${po.length} 張主任代墊的發票結成 ${CM} 月第 ${S().settlements.filter(s => s.y === CY && s.m === CM).length + 1} 次結報清單，合計 ${fmt(total)} 元。結算後清單會清空，重新累計。</p>`, doSettle, '結算');
+      return ask('結算到今天', `<p class="hint">會把勾選的 ${po.length} 張主任代墊的發票結成 ${CM} 月第 ${nextSettleN()} 次結報清單，合計 ${fmt(total)} 元。${rest ? `沒勾選的 ${rest} 張留在本期，下次再結算。` : '結算後清單會清空，重新累計。'}</p>`, doSettle, '結算');
     }
-    case 'printCash': return openPreview({ title: '代墊金結報清單（本期，還沒結算）', pages: [cashSheet(sortPetty(pettyOpen()), '本期（尚未結算）', CY, CM)] });
+    case 'printCash': return openPreview({ title: '代墊金結報清單（本期，還沒結算）', pages: [cashSheet(pettyPicked(), '本期（尚未結算）', CY, CM)] });
     case 'printFood': { const { y, m } = SEL_M.food; return openPreview({ title: '食材費統計', pages: [foodSheet(y, m)] }) }
     case 'printRcptAll': {
       const { y, m } = SEL_M.fee, kids = monthKids(y, m); if (!kids.length) return toast('還沒有幼兒名單。');
