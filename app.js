@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.19.11';
+const VERSION = '2026.11.19.12';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -497,13 +497,19 @@ function rowInv(x, withTick) {
    <span class="amount">${fmt(amt(x))}</span><button type="button" class="edit" data-edit="${x.id}">修改</button></div>`;
 }
 /* 還沒做憑證的發票：照「類別＋付款對象＋經費來源」分組，一組就是可以合成一張憑證的發票 */
+function invGroupsHTML(list) {
+  const gs = invGroups(list), n = gs.filter(g => !isWB(g[0])).length, lab = t => `<div class="grplab">${t}</div>`;
+  if (!n || n === gs.length) return gs.map(grpInv).join('');
+  return lab('色紙：營運收入支應、提升托育品質等') + gs.slice(0, n).map(grpInv).join('') + lab('一般紙：委辦費') + gs.slice(n).map(grpInv).join('');
+}
 function invGroups(list) {
   const order = new Map(); cats().forEach(g => g.items.forEach(i => order.has(i) || order.set(i, order.size)));
   const m = new Map();
   for (const x of list) { const k = [x.cat, x.payer, x.src].join('\u0001'); if (!m.has(k)) m.set(k, []); m.get(k).push(x) }
   const first = g => g[0].ym * 100 + g[0].d;
+  const wb = g => isWB(g[0]) ? 1 : 0;          // 色紙（營運收入支應、提升托育品質⋯）排上面，委辦費（一般紙）排下面
   return [...m.values()].map(g => g.sort((a, b) => a.ym - b.ym || a.d - b.d)).sort((a, b) =>
-    (order.get(a[0].cat) ?? 1e6) - (order.get(b[0].cat) ?? 1e6) || a[0].cat.localeCompare(b[0].cat) ||
+    wb(a) - wb(b) || (order.get(a[0].cat) ?? 1e6) - (order.get(b[0].cat) ?? 1e6) || a[0].cat.localeCompare(b[0].cat) ||
     (a[0].payer === '主任' ? 0 : 1) - (b[0].payer === '主任' ? 0 : 1) || first(a) - first(b));
 }
 const grpAll = ids => ids.every(id => sel.has(id));
@@ -528,7 +534,7 @@ function invView() {
   $('#view').innerHTML = `
   <p class="hint">同一組的發票可以合成一張憑證：按「全選這組」或自己勾選，再按下方「合併成憑證」，編號、受款人、用途說明和金額都會自動帶入。</p>
   <section><h2>還沒做憑證<small>${open.length} 張</small></h2>
-   ${open.length ? invGroups(open).map(grpInv).join('') : `<div class="empty">${S().loaded.invoices ? '目前沒有還沒做憑證的發票。按「＋ 新增發票」開始記帳。' : '正在載入發票…'}</div>`}</section>
+   ${open.length ? invGroupsHTML(open) : `<div class="empty">${S().loaded.invoices ? '目前沒有還沒做憑證的發票。按「＋ 新增發票」開始記帳。' : '正在載入發票…'}</div>`}</section>
   <section><h2>最近已做憑證<small>上個月起 ${done.length} 張；已做憑證或已結算的不能修改</small></h2>
    ${done.length ? `<div class="list">${done.map(x => rowInv(x)).join('')}</div>` : '<div class="empty">還沒有。</div>'}</section>`;
 }
@@ -907,7 +913,7 @@ function set() {
 const HELP = [
   { id: 'start', t: '第一次使用', shot: 'set', steps: ['到「更多 → 設定」，打開「公托資料」，填主任姓名和計畫主持人（01 號受款人），按「儲存公托資料」。', '打開「員工名單」，一行一位，順序就是薪資憑證的編號（第一位是 02）。', '打開「委辦費預算」，依契約書填人事費、業務費總額和各細項。', '到「月費」按「＋ 新增幼兒」，輸入座號、姓名和生日。'] },
   { id: 'add', t: '輸入發票', shot: 'dlginv', steps: ['拿到發票就按「＋ 新增發票」。', '代墊人預設是主任；付給廠商的選「付給廠商」並填廠商名稱。', '年、月已帶好，選日期、類別，填品名、數量和單價。經費來源會依類別自動帶出。', '不習慣一個畫面填很多欄位，可以在「本月」或「設定」改成一步一步模式。'] },
-  { id: 'merge', t: '合併成憑證', shot: 'merge', steps: ['到「發票」，還沒做憑證的發票會照「類別＋付款對象」分組，同一組就能合成一張憑證。', '按組名右邊的「全選這組」，或自己勾選要合併的幾張。', '按下方「合併成憑證」，編號、受款人、經費來源、用途說明、金額都會自動帶入。', '需要時可以改用途說明，或加一行備註（會印在簽章欄下方）。', '建立憑證需要網路，避免兩台裝置用到同一個編號。'] },
+  { id: 'merge', t: '合併成憑證', shot: 'merge', steps: ['到「發票」，還沒做憑證的發票會照「類別＋付款對象」分組，同一組就能合成一張憑證。要印色紙的（營運收入支應、提升托育品質）排上面，委辦費（一般紙）排下面。', '按組名右邊的「全選這組」，或自己勾選要合併的幾張。', '按下方「合併成憑證」，編號、受款人、經費來源、用途說明、金額都會自動帶入。', '需要時可以改用途說明，或加一行備註（會印在簽章欄下方）。', '建立憑證需要網路，避免兩台裝置用到同一個編號。'] },
   { id: 'print', t: '列印憑證', shot: 'print', steps: ['到「更多 → 憑證與列印」，按「列印憑證」。', '還沒印的會先勾好；要補印的，在「要印哪幾張」清單自己勾起來。', '先印第 1 批委辦費（一般紙），再印第 2 批其他經費來源（色紙），畫面會說要放幾張色紙。', '可以左右滑動或按「上一張／下一張」看每一張。', '這個月有在系統之外先做過憑證（手寫、Excel）：按「設定起始編號」填已經用到第幾號，系統從下一號接著編。頁面右上角的「下一張憑證」隨時顯示下一張的編號。', '印出後才發現發票金額錯了：按那張憑證的「修改」，選要改的發票，改好後憑證金額、結報清單和年度報表會一起更新，編號不變。紙本手改就好，不一定要重印。'] },
   { id: 'cash', t: '零用金結算', shot: 'cash', steps: ['每月兩次，到「更多 → 零用金結算」。', '清單列主任代墊的發票，還有生日禮金、考核獎金（主任代墊），照憑證編號排列，會計可以拿著憑證依序對帳。', '預設全部勾選；這次只要結算其中幾張，把其他的勾勾拿掉，沒勾的會留到下一次。', '按「結算到今天」。還有發票沒做憑證、憑證沒印的，會先提醒你。', '結算過的清單在下方「已結算」，可以再列印；結算後才發現問題，按「退回」，發票回到本期改好再重新結算。'] },
   { id: 'staff', t: '人事費', shot: 'staff', steps: ['薪資清冊做好後，到「更多 → 人事費」。', '每位員工填這個月的金額，經費來源預設委辦費-人事費。', '委辦人事費不夠時，按那位員工的「拆單」，填委辦費付多少，其餘自動改由營運收入支應。', '按「儲存本月人事費」。員工的生日月份在「設定 → 員工名單」填好，生日那個月儲存人事費時會自動建立生日禮金（預設 500 元），首頁也會提醒。', '生日禮金、考核獎金和外聘督導費的憑證，按「列印」會先填領款收據（日期、姓名、服務單位等；地址和身分證字號可以留空給領款人手寫，填了也不會存起來），印成上面粘存單、下面領款收據。', '考核獎金：打開「考核獎金（一次填所有員工）」，選期別，每位員工選等第（優等 5,000、甲等 3,000 會自動帶入，可改），按「建立考核獎金憑證」。', '12 月會多一區「年度年終獎金」，每位員工直接填金額，按「建立年終獎金憑證」一次做好。代班薪資和其他月份的生日禮金、年終獎金在下方「其他人事支出」新增。'] },

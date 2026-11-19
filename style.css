@@ -378,3 +378,5 @@ input[type=date]{font:16px var(--font);padding:8px;border:1px solid var(--line);
 .nextno:not([hidden])+.qhelp{margin-left:0}
 @media (max-width:400px){.nx-long{display:none}.nextno{padding:0 10px}.qhelp{font-size:14px}}
 .ptitle .pagename{white-space:nowrap}
+.grplab{margin:14px 4px 6px;font-size:15px;font-weight:700;color:var(--muted)}
+.grplab:first-child{margin-top:4px}
