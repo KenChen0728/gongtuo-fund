@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.18.10';
+const VERSION = '2026.11.19.1';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -71,10 +71,11 @@ const vouchersOf = (y, m) => vouchers().filter(v => v.y === y && v.m === m);
 const printableOf = (y, m) => vouchersOf(y, m).filter(v => v.kind === 'inv').sort((a, b) => a.no.localeCompare(b.no));
 const unprintedAll = () => vouchers().filter(v => v.kind === 'inv' && !v.printed);
 const pre = (y, m) => N.code + y + String(m).padStart(2, '0');
+// 下一個憑證編號：保留號碼之後，最小的還沒用過的號碼（垃圾桶裡的也算用過；在垃圾桶「永久刪除」後才空出來）
 function nextNo(y = CY, m = CM) {
-  const p = pre(y, m); let max = +N.reserved || 0;
-  for (const v of S().vouchers) if (v.no.startsWith(p)) max = Math.max(max, +v.no.slice(p.length) || 0);
-  return p + String(max + 1).padStart(2, '0');
+  const p = pre(y, m), used = new Set(S().vouchers.filter(v => v.no.startsWith(p)).map(v => +v.no.slice(p.length) || 0));
+  let n = (+N.reserved || 0) + 1; while (used.has(n)) n++;
+  return p + String(n).padStart(2, '0');
 }
 function sortPetty(list) { const key = x => x.voucher ? '0' + x.voucher : '1'; return list.slice().sort((a, b) => key(a).localeCompare(key(b)) || a.ym - b.ym || a.d - b.d); }
 const monthDoc = (y, m) => S().months[ymKey(y, m)] || {};
@@ -385,7 +386,7 @@ function upgradeSettings(cur, nid = NID) {
 function purgeTrash() {
   const limit = Date.now() - 30 * 864e5, ops = [];
   for (const x of S().invoices) if (x.deleted && x.deletedAt < limit) ops.push({ c: 'invoices', id: x.id, remove: true });
-  for (const v of S().vouchers) if (v.deleted && v.deletedAt < limit) ops.push({ c: 'vouchers', id: v.id, remove: true });
+  for (const v of S().vouchers) if (v.deleted && !v.purged && v.deletedAt < limit) ops.push({ c: 'vouchers', id: v.no, data: { no: v.no, y: v.y, m: v.m, ym: v.ym, kind: v.kind, deleted: true, deletedAt: v.deletedAt, purged: true, amount: 0, ids: [], desc: '' }, merge: false });   // 滿 30 天只清內容，編號仍算用過
   if (ops.length) store.batch(ops).catch(() => { });
 }
 function maybeAlert(force) {
@@ -745,11 +746,11 @@ function staff() {
   </section>`;
 }
 function trash() {
-  const di = S().invoices.filter(x => x.deleted), dv = S().vouchers.filter(v => v.deleted);
+  const di = S().invoices.filter(x => x.deleted), dv = S().vouchers.filter(v => v.deleted && !v.purged);
   const left = t => Math.max(0, 30 - Math.floor((Date.now() - t) / 864e5));
-  $('#view').innerHTML = `<p class="hint">刪除的發票和取消的憑證會在這裡放 30 天，任何一台裝置都能救回來；滿 30 天自動清除。</p>
+  $('#view').innerHTML = `<p class="hint">刪除的發票和取消的憑證會在這裡放 30 天，任何一台裝置都能救回來；滿 30 天自動清除（憑證編號仍然保留，不會再用到）。</p>
   <section><h2>發票<small>${di.length} 張</small></h2>${di.length ? `<div class="list">${di.map(x => `<div class="row"><div class="main"><div class="title">${esc(x.cat)}：${esc(x.desc)}</div><div class="meta"><span>${x.m}/${x.d}</span><span>還剩 ${left(x.deletedAt)} 天</span></div></div><span class="amount">${fmt(amt(x))}</span><button type="button" class="edit" data-restorei="${x.id}">救回</button></div>`).join('')}</div>` : '<div class="empty">垃圾桶是空的。</div>'}</section>
-  <section><h2>取消的憑證<small>${dv.length} 張</small></h2>${dv.length ? `<div class="list">${dv.map(v => `<div class="row"><div class="main"><div class="title">${esc(v.no)}　${esc(v.desc)}</div><div class="meta"><span>還剩 ${left(v.deletedAt)} 天</span></div></div><span class="amount">${fmt(v.amount)}</span><button type="button" class="edit" data-restorev="${esc(v.no)}">救回</button></div>`).join('')}</div>` : '<div class="empty">沒有取消的憑證。</div>'}</section>`;
+  <section><h2>取消的憑證<small>${dv.length} 張</small></h2>${dv.length ? `<div class="list">${dv.map(v => `<div class="row"><div class="main"><div class="title">${esc(v.no)}　${esc(v.desc)}</div><div class="meta"><span>還剩 ${left(v.deletedAt)} 天</span></div></div><span class="amount">${fmt(v.amount)}</span><div class="acts"><button type="button" class="edit" data-restorev="${esc(v.no)}">救回</button><button type="button" class="edit" data-purgev="${esc(v.no)}">永久刪除</button></div></div>`).join('')}</div><p class="hint" style="font-size:15px">取消的憑證編號不會再用到。要讓下一張新憑證沿用同一個編號，按「永久刪除」。</p>` : '<div class="empty">沒有取消的憑證。</div>'}</section>`;
 }
 function set() {
   const B = N.budget || {}, U = N.usedBefore || {};
@@ -822,7 +823,7 @@ const HELP = [
   { id: 'staff', t: '人事費', shot: 'staff', steps: ['薪資清冊做好後，到「更多 → 人事費」。', '每位員工填這個月的金額，經費來源預設委辦費-人事費。', '委辦人事費不夠時，按那位員工的「拆單」，填委辦費付多少，其餘自動改由營運收入支應。', '按「儲存本月人事費」。生日禮金、代班薪資、年終獎金在下方新增。'] },
   { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。餐點費看孩子到當月 1 號滿幾個月：未滿 6 個月不收、未滿 1 歲 300 元、滿 1 歲 600 元。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變；每年 1 月從 001 號重新開始。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。', '收據日期在頁面最上面，預設每月 15 號（遇週末順延），每個月可以自己改；預設幾號在「設定 → 收據」改，優化比、契約價金也可以設不同的預設日。', '有幾張要用不同的日期：按「勾選改日期」，像發票一樣勾選收據，在下方選日期後按「套用日期」。', '頁面下方「請款收據」：1、4、7、10 月會出現優化比（繳款人預設屏東縣政府；1 月是前一年第四期），1、2、7、10 月會出現契約價金（繳款人預設協會）。按「填寫」確認金額、貼上摘要，再按「列印」。其他要開的收據按「＋ 其他收據」。'] },
   { id: 'report', t: '報表', shot: 'report', steps: ['「年度經費報表」照每月報表的格式，自動算每月收入、支出、損益，和委辦費、行管費用了幾 %。', '優化比、提升托育品質、縣府補助款到帳時，按「＋ 新增撥款收入」；補助款要選期別（第一期、第二期⋯），每一期各一列。', '按「列印（A4 橫式）」印一頁；按「匯出 Excel」下載和原本格式一樣的 Excel（標楷體、顏色、公式）。', '系統啟用前的月份，按「從 Excel 補登」選原本的經費明細檔，核對數字後按「補登」。補登之後才在系統新增的憑證、撥款收入會自動加上去；Excel 那個月沒有月費的，用系統算的月費。要交縣府時按「產出核銷報表」。'] },
-  { id: 'trash', t: '刪錯了怎麼辦', shot: 'trash', steps: ['刪除的發票、取消的憑證會在「更多 → 垃圾桶」放 30 天。', '按「救回」就回到原本的地方，任何一台裝置都能救。', '剛刪掉時，畫面下方的提示也有「復原」可以按。'] },
+  { id: 'trash', t: '刪錯了怎麼辦', shot: 'trash', steps: ['刪除的發票、取消的憑證會在「更多 → 垃圾桶」放 30 天。', '按「救回」就回到原本的地方，任何一台裝置都能救。', '剛刪掉時，畫面下方的提示也有「復原」可以按。', '憑證做錯想沿用同一個編號：先取消憑證，再到垃圾桶按「永久刪除」，下一張新做的憑證就會用這個編號。'] },
   { id: 'backup', t: '備份與還原', shot: 'backup', steps: ['建議每個月到「更多 → 設定 → 備份」按「下載備份」，存到電腦。', '萬一資料被改錯，按「從備份還原」，選那個備份檔。', '還原前會先自動下載一份目前的資料，還原錯了還能再還原回來。', '備份之後才新增的資料不會被刪掉。', '管理者每月 25 號起會看到提醒，到「設定 → 備份」按「一次下載四間」，會下載四間的每月報表（Excel）和備份（還原用）兩個檔案。還原時選這個四間的備份檔也可以，會自動取出目前這間。'] },
   { id: 'install', t: '安裝成 App', steps: ['iPhone、iPad：用 Safari 開啟，按分享 →「加入主畫面」。', 'Android：用 Chrome 開啟，按右上選單 →「加到主畫面」或「安裝應用程式」。', '電腦（Windows、Mac、Chromebook）：用 Chrome 或 Edge 開啟，按網址列右邊的安裝圖示。', '從 LINE 點開的話，請先選「用預設瀏覽器開啟」，登入才會留下來。'] },
 ];
@@ -1599,10 +1600,17 @@ document.addEventListener('click', e => {
   if (t.dataset.printv) { const v = S().vouchers.find(x => x.no === t.dataset.printv); return openPreview({ title: `支出憑證 ${v.no}`, pages: [voucherSheet(v)], onPrint: () => store.update('vouchers', v.no, { printed: true, printedAt: TODAY, amountPrinted: null }).catch(fail()) }) }
   if (t.dataset.cancelv) {
     const v = S().vouchers.find(x => x.no === t.dataset.cancelv);
-    return ask(`取消憑證 ${v.no}`, `<p class="hint">${esc(v.desc)}，${fmt(v.amount)} 元。取消後${v.kind === 'inv' ? '這些發票會回到「還沒做憑證」，' : ''}憑證放進垃圾桶 30 天，可以救回。編號不會被重複使用。</p>`, () => {
+    return ask(`取消憑證 ${v.no}`, `<p class="hint">${esc(v.desc)}，${fmt(v.amount)} 元。取消後${v.kind === 'inv' ? '這些發票會回到「還沒做憑證」，' : ''}憑證放進垃圾桶 30 天，可以救回。編號不會被重複使用；想讓下一張沿用這個編號，取消後到「更多 → 垃圾桶」按「永久刪除」。</p>`, () => {
       store.batch([{ c: 'vouchers', id: v.no, update: { deleted: true, deletedAt: Date.now() } }, ...(v.ids || []).map(id => ({ c: 'invoices', id, update: { voucher: null } }))]).catch(fail());
       toast(`已取消 ${v.no}。`);
     }, '取消這張憑證', 'btn danger');
+  }
+  if (t.dataset.purgev) {
+    const v = S().vouchers.find(x => x.no === t.dataset.purgev); if (!v) return;
+    return ask(`永久刪除 ${v.no}`, `<p class="hint">刪除後沒辦法救回，${esc(v.no)} 這個編號會空出來，下一張新做的${v.m} 月憑證會用這個編號。</p>${v.printed ? '<p class="hint">這張憑證已經印過，舊的紙本請作廢，以免和新的那張同號。</p>' : ''}`, () => {
+      store.batch([{ c: 'vouchers', id: v.no, remove: true }]).catch(fail('沒有刪除成功，請再試一次。'));
+      toast(`已永久刪除，下一張${v.m} 月憑證會用 ${v.no}。`);
+    }, '永久刪除', 'btn danger');
   }
   if (t.dataset.restorei) { store.update('invoices', t.dataset.restorei, { deleted: false, deletedAt: null }).catch(fail()); toast('已救回這張發票。'); return }
   if (t.dataset.restorev) {
@@ -1782,5 +1790,5 @@ document.addEventListener('click', e => { const b = e.target.closest('button'); 
 const _render = render;
 render = function () { if (dirty && (view === 'set' || view === 'staff')) return; _render(); };
 
-window.__app = { go, get store() { return store }, upgrade: upgradeSettings, fillInv: fillInvForm, openWiz, annual };   // 自動測試用
+window.__app = { go, get store() { return store }, upgrade: upgradeSettings, fillInv: fillInvForm, openWiz, annual, nextNo, purgeTrash };   // 自動測試用
 boot();
