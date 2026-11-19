@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.19.12';
+const VERSION = '2026.11.19.13';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -32,10 +32,11 @@ const DEFAULT_CATS = [
   { src: '營運收入支應-業務費', items: ['員工福利', '專業提升研習費', '教學活動及節慶活動用品', '玩具書籍', '幼兒退費'] },
   { src: '營運收入支應-餐點費', items: ['幼兒食材'] },
   { src: '營運收入支應-兒童團體保險', items: ['兒童團體保險'] },
-  { src: '提升托育品質-業務費', items: ['提升托育品質'] },
+  { src: '提升托育品質-業務費', items: ['業務費'] },
+  { src: '提升托育品質-人事費', items: ['人事費'] },
   { src: '委辦費-行管費', items: ['行政管理費'] },
 ];
-const SETTINGS_REV = 4;
+const SETTINGS_REV = 5;
 // 委辦費-業務費的細項：上面那串是萬丹的；其他三間預設只有這 6 項，不用的可以在設定刪除、再加自己的。01 號四間都是計畫督導津貼
 const OTHER_WB = ['影印機', '網路通訊費', '愛托付', '保險', '計畫督導津貼', '104系統'];
 const OTHER_CATS = DEFAULT_CATS.map((g, i) => i ? g : { ...g, items: [...OTHER_WB] });
@@ -392,6 +393,15 @@ function upgradeSettings(cur, nid = NID) {
       const bb = b || cur.budget || {}, uu = u || cur.usedBefore || {};
       const keep = g0.items.filter(x => !OTHER_WB.includes(x) && (+bb[x] || +uu[x]));
       p.cats = cs.map(g => g === g0 ? { ...g, items: [...OTHER_WB, ...keep] } : g);
+    }
+  }
+  // rev 5：提升托育品質分成業務費、人事費兩項（原本的「提升托育品質」改名「業務費」，再加人事費）
+  if ((cur.rev || 1) < 5) {
+    let c5 = p.cats || cs;
+    if (c5) {
+      c5 = c5.map(g => g.src === '提升托育品質-業務費' ? { ...g, items: [...new Set([...g.items.map(x => x === '提升托育品質' ? '業務費' : x), '業務費'])] } : g);
+      if (!c5.some(g => g.src === '提升托育品質-人事費')) { const i = c5.findIndex(g => g.src === '提升托育品質-業務費'); c5.splice(i < 0 ? c5.length : i + 1, 0, { src: '提升托育品質-人事費', items: ['人事費'] }) }
+      p.cats = c5;
     }
   }
   return p;
