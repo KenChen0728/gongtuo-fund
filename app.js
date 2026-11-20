@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.20.1';
+const VERSION = '2026.11.20.2';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -239,7 +239,7 @@ const manualAt = (y, m) => +((monthDoc(y, m).manual || {}).at) || 0;
 const addedAfterImport = x => (x.createdAt || 0) > manualAt(x.y, x.m);
 function manualExtra(y, m) {
   const r = emptyMonth(), at = manualAt(y, m);
-  for (const x of (monthDoc(y, m).manual || {}).rows || []) { const a = +x.a || 0; if (x.k === 'sub') r.sub[x.l] = (r.sub[x.l] || 0) + a; else if (x.k in r) r[x.k] += a; }
+  for (const x of (monthDoc(y, m).manual || {}).rows || []) { const a = +x.a || 0; if (x.k === 'sub') r.sub[x.l] = (r.sub[x.l] || 0) + a; else if (x.k === 'cus') r.cus[x.l] = (r.cus[x.l] || 0) + a; else if (x.k in r && typeof r[x.k] === 'number') r[x.k] += a; }
   const vs = vouchersOf(y, m).filter(v => (v.createdAt || 0) > at), inc = incomesOf(y, m).filter(x => (x.createdAt || 0) > at);
   const sysFee = !r.fee && feeTotal(y, m) > 0, sysPay = !r.wbHR && !r.opHR && !!monthDoc(y, m).payroll;
   if (sysFee) r.fee = feeTotal(y, m);
@@ -271,7 +271,8 @@ function annual(y) {
   const incTotal = sum(incRows.map(r => r.total)), opTotal = sum(groups.flatMap(g => g.rows).map(r => r.total));
   const expBudget = opTotal + sum([...wb, adm].map(r => r.b));     // 範本「支出(含補助)」：委辦和行管費用預算全額計
   const cusNames = []; months.forEach(x => x.d && Object.keys(x.d.cus || {}).forEach(l => { if (!cusNames.includes(l)) cusNames.push(l) }));
-  const cus = cusNames.map(l => { const v = months.map(x => x.d ? (x.d.cus || {})[l] ?? null : null); return { t: l, v, total: sum(v) } });
+  const CB = y === CY ? N.cusBudget || {} : {}; Object.keys(CB).forEach(l => { if (+CB[l] && !cusNames.includes(l)) cusNames.push(l) });
+  const cus = cusNames.map(l => { const v = months.map(x => x.d ? (x.d.cus || {})[l] ?? null : null), total = sum(v), b = +CB[l] || 0; return { t: l, v, total, b, left: b - total } });
   return { y, months, cus, inc, sub, groups, wb, adm, incRows, expRows, loss, lossTotal: sum(loss), incTotal, expTotal: sum(expRows.map(r => r.total)), expBudget, opTotal };
 }
 function wbPersonUsed() { const A = annual(CY); return (manualUntil(CY) ? 0 : +N.wbPersonUsedBefore || 0) + A.wb[0].total; }
@@ -749,6 +750,8 @@ function undoMove(id) {
   store.setSettings({ budget: B, wbMoves: (N.wbMoves || []).filter(x => x.id !== id) }).catch(fail());
   toast(`已還原：${r.to}的 ${fmt(r.amount)} 元還給${r.from}。`);
 }
+// 其他經費來源（各公托自己加的，或從 Excel 補登進來的，例如開辦費）
+const cusSrcNames = () => [...new Set([...cats().map(g => g.src).filter(isCustomSrc), ...Object.keys(N.cusBudget || {}), ...annual(CY).cus.map(r => r.t)])];
 // 報表頁「委辦費預算與挪用」：設定預算（原本在設定頁）
 let BUD_OPEN = false;
 function budgetEditor() {
@@ -761,6 +764,8 @@ function budgetEditor() {
     ${wbItems().map((k, i) => `<tr><td>${k}</td><td><input type="number" inputmode="numeric" data-bud="${i}" value="${B[k] || ''}"></td><td><input type="number" inputmode="numeric" data-used="${i}" value="${U[k] || ''}"></td></tr>`).join('')}
    </tbody><tfoot><tr><td>細項合計</td><td id="bSum">${fmt(bsum)}</td><td></td></tr></tfoot></table></div>
    <p class="err" id="bWarn" ${bsum && +N.wbBizTotal && bsum !== +N.wbBizTotal ? '' : 'hidden'}>細項合計和業務費總額不一樣，請再確認。</p>
+   ${(() => { const names = cusSrcNames(); return names.length ? `<div class="title" style="margin-top:6px">其他經費來源的年度預算</div><p class="hint" style="font-size:14px">例如開辦費。填了會列在年度報表最下方「其他經費來源」，顯示預算、已用和剩餘；不算進上方損益。</p>
+   <div class="tablewrap bgrid"><table><thead><tr><th>經費來源</th><th>${CY} 年預算</th></tr></thead><tbody>${names.map((k, i) => `<tr><td>${esc(k)}</td><td><input type="number" inputmode="numeric" data-cusbud="${i}" value="${+(N.cusBudget || {})[k] || ''}"></td></tr>`).join('')}</tbody></table></div>` : '' })()}
    <div class="actions start"><button type="button" class="btn primary" id="saveBudget">儲存預算</button></div>
   </details>`;
 }
@@ -961,7 +966,7 @@ const HELP = [
   { id: 'cash', t: '零用金結算', shot: 'cash', steps: ['每月兩次，到「更多 → 零用金結算」。', '清單列主任代墊的發票，還有生日禮金、考核獎金（主任代墊），照憑證編號排列，會計可以拿著憑證依序對帳。', '預設全部勾選；這次只要結算其中幾張，把其他的勾勾拿掉，沒勾的會留到下一次。', '按「結算到今天」。還有發票沒做憑證、憑證沒印的，會先提醒你。', '結算過的清單在下方「已結算」，可以再列印；結算後才發現問題，按「退回」，發票回到本期改好再重新結算。'] },
   { id: 'staff', t: '人事費', shot: 'staff', steps: ['薪資清冊做好後，到「更多 → 人事費」。', '每位員工填這個月的「薪資總額」，經費來源預設委辦費-人事費。', '委辦人事費不夠時，按那位員工的「拆單」：下面會多兩行，① 填委辦費-人事費付多少，② 營運收入支應-人事費自動算（總額減委辦）。按「儲存本月人事費」時，營運那份會另外建一張「薪資(2)」憑證。', '按「儲存本月人事費」。員工的生日月份在「設定 → 員工名單」填好，生日那個月儲存人事費時會自動建立生日禮金（預設 500 元），首頁也會提醒。', '生日禮金、考核獎金和外聘督導費的憑證要附領款收據：建立後人事費頁最上面會列出「還沒填寫列印」的，按綠色的「列印＋領據」先填領款收據（日期、姓名、服務單位等；地址和身分證字號可以留空給領款人手寫，填了也不會存起來），印成上面粘存單、下面領款收據。', '考核獎金：打開「考核獎金（一次填所有員工）」，選期別，每位員工選等第（優等 5,000、甲等 3,000 會自動帶入，可改），按「建立考核獎金憑證」。', '12 月會多一區「年度年終獎金」，每位員工直接填金額，按「建立年終獎金憑證」一次做好。代班薪資和其他月份的生日禮金、年終獎金在下方「其他人事支出」新增。'] },
   { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。餐點費看孩子到當月 1 號滿幾個月：未滿 6 個月不收、未滿 1 歲 300 元、滿 1 歲 600 元。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。備註會列在月費表下方，也會印在那位孩子的收據摘要裡。月費、餐點費預設系統算，要改金額就在「修改」裡的「月費」「餐點費」欄填數字，清空就回到系統算的。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變；每年 1 月從 001 號重新開始。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。', '收據日期在頁面最上面，預設每月 15 號（遇週末順延），每個月可以自己改；預設幾號在「設定 → 收據」改，優化比、契約價金也可以設不同的預設日。', '每位孩子那一列都寫收據號碼和日期；只印一張就按那一列的「印這張」。', '要一次印好幾張，或改好幾張的日期：按「勾選多張（改日期／一起印）」，勾選後在畫面最下方按「列印勾選的」，或選日期按「套用日期」（只改勾選的，沒勾的維持原日期）。', '頁面下方「請款收據」：1、4、7、10 月會出現優化比（繳款人預設屏東縣政府；1 月是前一年第四期），1、2、7、10 月會出現契約價金（繳款人預設協會）。按「填寫」確認金額、貼上摘要，再按「列印」。其他要開的收據按「＋ 其他收據」。'] },
-  { id: 'report', t: '報表', shot: 'report', steps: ['「年度經費報表」照每月報表的格式，自動算每月收入、支出、損益，和委辦費、行管費用了幾 %。', '優化比、提升托育品質、縣府補助款到帳時，按「＋ 新增撥款收入」；補助款要選期別（第一期、第二期⋯），每一期各一列。', '按「列印（A4 橫式）」印一頁；按「匯出 Excel」下載和原本格式一樣的 Excel（標楷體、顏色、公式）。', '委辦業務費有項目快用完或超支時，報表頁會列出「不夠用的項目」，按「補足」選要從哪一項轉出、金額，業務費總額不變；挪用紀錄可以還原。', '系統啟用前的月份，按「從 Excel 補登」選原本的經費明細檔，核對數字後按「補登」。補登之後才在系統新增的憑證、撥款收入會自動加上去；Excel 那個月沒有月費的，用系統算的月費。要交縣府時按「產出核銷報表」。'] },
+  { id: 'report', t: '報表', shot: 'report', steps: ['「年度經費報表」照每月報表的格式，自動算每月收入、支出、損益，和委辦費、行管費用了幾 %。', '優化比、提升托育品質、縣府補助款到帳時，按「＋ 新增撥款收入」；補助款要選期別（第一期、第二期⋯），每一期各一列。', '按「列印（A4 橫式）」印一頁；按「匯出 Excel」下載和原本格式一樣的 Excel（標楷體、顏色、公式）。', '委辦業務費有項目快用完或超支時，報表頁會列出「不夠用的項目」，按「補足」選要從哪一項轉出、金額，業務費總額不變；挪用紀錄可以還原。', '系統啟用前的月份，按「從 Excel 補登」選原本的經費明細檔，核對數字後按「補登」。補登之後才在系統新增的憑證、撥款收入會自動加上去；Excel 那個月沒有月費的，用系統算的月費。Excel 裡系統沒有固定位置的列（例如開辦費）可以勾選匯入成「其他經費來源」，列在報表最下方，連年度預算一起帶入；已經補登過的話，選「只加入勾選的其他經費來源」，原本的數字不會動。要交縣府時按「產出核銷報表」。'] },
   { id: 'trash', t: '刪錯了怎麼辦', shot: 'trash', steps: ['刪除的發票、取消的憑證會在「更多 → 垃圾桶」放 30 天。', '按「救回」就回到原本的地方，任何一台裝置都能救。', '剛刪掉時，畫面下方的提示也有「復原」可以按。', '憑證做錯想沿用同一個編號：先取消憑證，再到垃圾桶按「永久刪除」，下一張新做的憑證就會用這個編號。'] },
   { id: 'backup', t: '備份與還原', shot: 'backup', steps: ['建議每個月到「更多 → 設定 → 備份」按「下載備份」，存到電腦。', '萬一資料被改錯，按「從備份還原」，選那個備份檔。', '還原前會先自動下載一份目前的資料，還原錯了還能再還原回來。', '備份之後才新增的資料不會被刪掉。', '管理者每月 25 號起會看到提醒，到「設定 → 備份」按「一次下載四間」，會下載四間的每月報表（Excel）和備份（還原用）兩個檔案。還原時選這個四間的備份檔也可以，會自動取出目前這間。'] },
   { id: 'install', t: '安裝成 App', steps: ['iPhone、iPad：用 Safari 開啟，按分享 →「加入主畫面」。', 'Android：用 Chrome 開啟，按右上選單 →「加到主畫面」或「安裝應用程式」。', '電腦（Windows、Mac、Chromebook）：用 Chrome 或 Edge 開啟，按網址列右邊的安裝圖示。', '從 LINE 點開的話，請先選「用預設瀏覽器開啟」，登入才會留下來。'] },
@@ -1091,7 +1096,7 @@ function annualHTML(A) {
   A.wb.forEach((r, i) => h += `<tr class="an-green">${i === 0 ? '<th rowspan="2" class="an-lavc">委辦支出</th>' : ''}<th>${r.t}</th><td class="m">${money(r.b)}</td>${mcells(r)}<td class="m">${money(r.left)}</td><td class="anside">${r.b ? Math.round(r.pct * 100) + '%' : ''}</td></tr>`);
   h += `<tr class="an-gray"><th colspan="2" class="admlab">${A.adm.t.replace('\n', '<br>')}</th><td class="m">${money(A.adm.b)}</td>${mcells(A.adm)}<td class="m">${money(A.adm.left)}</td><td class="anside">${A.adm.b ? Math.round(A.adm.pct * 100) + '%' : ''}</td></tr>`;
   h += `<tr class="an-lav"><th colspan="3">每月損益</th>${A.loss.map(v => `<td class="m">${money(v)}</td>`).join('')}<td class="m">${money(A.lossTotal)}</td><th class="anside">年盈餘</th></tr></tbody></table>`;
-  if (A.cus.length) h += `<table class="antable ancus"><thead><tr><th>其他經費來源（不算進上方損益）</th>${Array.from({ length: 12 }, (_, i) => `<th>${i + 1}月</th>`).join('')}<th>總額</th></tr></thead><tbody>${A.cus.map(r => `<tr><th>${esc(r.t)}</th>${r.v.map(v => `<td class="m">${v ? money(v) : ''}</td>`).join('')}<td class="m">${money(r.total)}</td></tr>`).join('')}</tbody></table>`;
+  if (A.cus.length) h += `<table class="antable ancus"><thead><tr><th>其他經費來源（不算進上方損益）</th><th>年度預算</th>${Array.from({ length: 12 }, (_, i) => `<th>${i + 1}月</th>`).join('')}<th>總額</th><th>剩餘</th></tr></thead><tbody>${A.cus.map(r => `<tr><th>${esc(r.t)}</th><td class="m">${r.b ? money(r.b) : ''}</td>${r.v.map(v => `<td class="m">${v ? money(v) : ''}</td>`).join('')}<td class="m">${money(r.total)}</td><td class="m">${r.b ? money(r.left) : ''}</td></tr>`).join('')}</tbody></table>`;
   h += `<table class="anbox"><tr><th>收入（含補助）</th><td>${money(A.incTotal)}</td></tr><tr><th>支出（含補助）</th><td>${money(A.expBudget)}</td></tr><tr><th>盈餘（含補助）</th><td>${money(A.incTotal - A.expBudget)}</td></tr></table>`;
   return h;
 }
@@ -1141,8 +1146,8 @@ function annualSheet(A) {
   box(r + 1, 1, r + 1, 2, '支出(含補助)', lab); box(r + 1, 3, r + 1, 4, A.expBudget, val); C['D' + (r + 1)].f = `SUM(P${opStart}:P${opEnd},C${wb0}:C${adm})`;
   box(r + 2, 1, r + 2, 2, '盈餘(含補助)', lab); box(r + 2, 3, r + 2, 4, A.incTotal - A.expBudget, val); C['D' + (r + 2)].f = `D${r}-D${r + 1}`;
   if (A.cus.length) {          // 各公托自己加的經費來源：放在最下面，上面的列號和原檔一樣
-    r += 4; box(r, 0, r, 2, '其他經費來源（不算進損益）', { bold: true }); for (let i = 0; i < 12; i++) put(col(3 + i) + r, `${i + 1}月`, {}); put('P' + r, '總額', {}); r++;
-    for (const x of A.cus) { box(r, 0, r, 2, x.t, {}); monthRow(x, null, r); put('P' + r, x.total, { fmt: FMT }, `SUM(D${r}:O${r})`); r++ }
+    r += 4; box(r, 0, r, 1, '其他經費來源（不算進損益）', { bold: true }); put('C' + r, '年度預算', {}); for (let i = 0; i < 12; i++) put(col(3 + i) + r, `${i + 1}月`, {}); put('P' + r, '總額', {}); put('Q' + r, '剩餘', {}); r++;
+    for (const x of A.cus) { box(r, 0, r, 1, x.t, {}); if (x.b) put('C' + r, x.b, { fmt: FMT }); monthRow(x, null, r); put('P' + r, x.total, { fmt: FMT }, `SUM(D${r}:O${r})`); if (x.b) put('Q' + r, x.left, { fmt: FMT }, `C${r}-P${r}`); r++ }
   }
   return { name: '每月報表', cells: C, merges: M, rows, landscape: true, cols: [10.75, 4.25, 12, 12.5, 12.5, 14.4, 13.9, 12.5, 12.5, 12.6, 13.4, 12.5, 12.5, 12.5, 12.5, 16.6, 7.5] };
 }
@@ -1167,7 +1172,7 @@ function mapImported(cells) {
   for (let r = head + 1; r <= head + 60; r++) {
     const A = txt(at('A', r)), B = txt(at('B', r));
     if (!A && !B) continue;
-    if (A === '總收入' || A.includes('含補助') || B.includes('含補助')) break;
+    if (A === '總收入' || A.includes('含補助') || B.includes('含補助')) { group = ''; continue }          // 下方的合計區跳過；再下面若有其他列（例如開辦費）照樣讀
     if (A.includes('每月損益') || A.includes('年盈餘')) { group = ''; continue }
     if (A && B) group = A; else if (A) group = '';
     let k = null, l = null;
@@ -1182,7 +1187,10 @@ function mapImported(cells) {
     else if (A === '提升托育品質') k = 'q';
     else if (A.includes('行管費')) { k = 'adm'; if (typeof at('C', r) === 'number') budgets.adm = num(at('C', r)) }
     else if (A.includes('補助')) { k = 'sub'; l = String(at('A', r)).trim() }
-    if (!k) { unknown.push(String(at('A', r) || '') + String(at('B', r) || '')); continue }
+    if (!k) {          // 沒對應到的列（例如只有這間有的開辦費）：先記下來，預覽時讓使用者勾選要不要匯入成「其他經費來源」
+      const label = (g ? g + (B ? '-' + B : '') : A || B).trim(), vals = Array.from({ length: 12 }, (_, i) => num(at(mcol[i + 1], r)));
+      unknown.push({ label, vals, budget: typeof at('C', r) === 'number' ? num(at('C', r)) : 0 }); continue
+    }
     for (let m = 1; m <= 12; m++) put(m, { k, ...(l ? { l } : {}), a: num(at(mcol[m], r)) });
   }
   return { months, budgets, unknown };
@@ -1195,18 +1203,37 @@ function importPreview(res, file) {
   ask('從 Excel 補登', `<p class="hint">讀到「${esc(file)}」的每月報表。請核對下面的數字和 Excel 一樣（單位：元）。</p>
    <div class="tablewrap" style="max-height:40vh;overflow:auto"><table class="imptable"><thead><tr><th>項目</th>${Array.from({ length: 12 }, (_, i) => `<th class="num">${i + 1}月</th>`).join('')}</tr></thead><tbody>
    ${keys.map(([k, t]) => `<tr><td>${t}</td>${Array.from({ length: 12 }, (_, m) => `<td class="num">${tot(m, k) ? fmt(tot(m, k)) : ''}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
-   ${res.unknown.length ? `<p class="hint" style="font-size:14px">沒有對應到的列（不會匯入）：${res.unknown.map(esc).join('、')}</p>` : ''}
+   ${res.unknown.length ? `<div class="card" style="gap:6px;padding:10px"><div class="title">其他的列</div><p class="hint" style="font-size:14px">這些列系統沒有固定位置。勾起來的會匯入成「其他經費來源」（例如開辦費），列在年度報表最下方，不算進上方損益；Excel 上有預算的話也一起帶入。合計、小計這類不用勾。</p>
+    ${res.unknown.map((u, i) => { const tot = u.vals.reduce((a, b) => a + b, 0), junk = /合計|小計|總計|損益|盈餘|收入|支出/.test(u.label); return `<label class="check" style="font-weight:400"><input type="checkbox" data-impcus="${i}" ${(tot || u.budget) && !junk ? 'checked' : ''}> <span><b>${esc(u.label)}</b>${u.budget ? `　預算 ${fmt(u.budget)}` : ''}${tot ? `　已用 ${fmt(tot)}` : '　（沒有金額）'}</span></label>` }).join('')}</div>` : ''}
+   ${manualUntil(CY) ? `<div class="card" style="gap:6px;padding:10px"><div class="title">今年已經補登過 1–${manualUntil(CY)} 月</div>
+    <label class="check" style="font-weight:400"><input type="radio" name="impMode" value="cus" ${res.unknown.length ? 'checked' : ''}> 只加入上面勾選的其他經費來源（例如開辦費），原本補登的數字、補登到幾月都不變</label>
+    <label class="check" style="font-weight:400"><input type="radio" name="impMode" value="all" ${res.unknown.length ? '' : 'checked'}> 全部重新補登（Excel 有更新過時用；補登之後在系統新增的憑證，會從這次補登的時間重新算）</label></div>` : ''}
    <div class="two"><label>年度<select id="impY"><option value="${CY}">民國 ${CY} 年</option><option value="${CY - 1}">民國 ${CY - 1} 年</option></select></label>
    <label>補登到幾月<select id="impM">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${i + 1 === def ? 'selected' : ''}>${i + 1} 月</option>`).join('')}</select></label></div>
    <p class="hint" style="font-size:14px">補登的月份用 Excel 的數字；之後的月份用系統裡的資料。之後可以在報表頁改。</p>
    ${B.wbHR || B.wbBiz || B.adm ? `<label class="check"><input type="checkbox" id="impB" checked> 預算也一起更新：委辦人事費 ${fmt(B.wbHR || 0)}、委辦業務費 ${fmt(B.wbBiz || 0)}、行管費 ${fmt(B.adm || 0)}</label>` : ''}`, () => {
     const y = +$('#impY').value, mu = +$('#impM').value;
-    const ops = res.months.map((rows, i) => ({ c: 'months', id: ymKey(y, i + 1), data: { y, m: i + 1, manual: { rows, at: Date.now() } } }));
+    const pick = res.unknown.filter((u, i) => (document.querySelector(`[data-impcus="${i}"]`) || {}).checked);
+    if ((document.querySelector('[name=impMode]:checked') || {}).value === 'cus') {          // 只加其他經費來源：其他補登的數字和時間不動
+      if (!pick.length) { toast('請先勾選要加入的列（例如開辦費）。'); return false }
+      const labs = pick.map(u => u.label), ops = [];
+      for (let i = 0; i < 12; i++) {
+        const man = monthDoc(y, i + 1).manual, add = pick.filter(u => u.vals[i]).map(u => ({ k: 'cus', l: u.label, a: u.vals[i] }));
+        if (!man && !add.length) continue;
+        const rows = [...((man || {}).rows || []).filter(x => !(x.k === 'cus' && labs.includes(x.l))), ...add];
+        ops.push({ c: 'months', id: ymKey(y, i + 1), data: { y, m: i + 1, manual: { rows, at: (man || {}).at || Date.now() } } });
+      }
+      if (ops.length) store.batch(ops).catch(fail());
+      const cb = pick.filter(u => u.budget); if (y === CY && cb.length) store.setSettings({ cusBudget: { ...(N.cusBudget || {}), ...Object.fromEntries(cb.map(u => [u.label, u.budget])) } }).catch(fail());
+      return toast(`已加入其他經費來源：${labs.join('、')}。其他補登的數字沒有變。`);
+    }
+    const ops = res.months.map((rows, i) => ({ c: 'months', id: ymKey(y, i + 1), data: { y, m: i + 1, manual: { rows: [...rows, ...pick.filter(u => u.vals[i]).map(u => ({ k: 'cus', l: u.label, a: u.vals[i] }))], at: Date.now() } } }));
     store.batch(ops).catch(fail());
     const patch = { manualUntil: { ...(N.manualUntil || {}), [y]: mu } };
     if ($('#impB') && $('#impB').checked) { if (B.wbHR) patch.wbPersonBudget = B.wbHR; if (B.wbBiz) patch.wbBizTotal = B.wbBiz; if (B.adm) patch.admBudget = B.adm }
+    if (y === CY) { const cb = pick.filter(u => u.budget); if (cb.length) patch.cusBudget = { ...(N.cusBudget || {}), ...Object.fromEntries(cb.map(u => [u.label, u.budget])) } }
     store.setSettings(patch).catch(fail());
-    toast(`已補登 ${y} 年 1–${mu} 月。`);
+    toast(`已補登 ${y} 年 1–${mu} 月。${pick.length ? `其他經費來源：${pick.map(u => u.label).join('、')}。` : ''}`);
   }, '補登');
 }
 $('#importFile').addEventListener('change', async e => {
@@ -2078,7 +2105,8 @@ document.addEventListener('click', e => {
       const budget = {}, usedBefore = {};
       wbItems().forEach((k, i) => { budget[k] = +document.querySelector(`[data-bud="${i}"]`).value || 0; usedBefore[k] = +document.querySelector(`[data-used="${i}"]`).value || 0 });
       const total = +$('#sBT').value || 0, sum = Object.values(budget).reduce((a, b) => a + b, 0);
-      store.setSettings({ budget, usedBefore, wbBizTotal: total, wbPersonBudget: +$('#sPB').value || 0, wbPersonUsedBefore: +$('#sPU').value || 0, admBudget: +$('#sAdm').value || 0 }).catch(fail());
+      const cusBudget = {}; cusSrcNames().forEach((k, i) => { const el = document.querySelector(`[data-cusbud="${i}"]`); if (el) cusBudget[k] = +el.value || 0 });   // 清空的存 0（設定是合併寫入，不能只少一個 key）
+      store.setSettings({ budget, usedBefore, wbBizTotal: total, wbPersonBudget: +$('#sPB').value || 0, wbPersonUsedBefore: +$('#sPU').value || 0, admBudget: +$('#sAdm').value || 0, cusBudget }).catch(fail());
       return toast(total && sum !== total ? `已儲存，但細項合計 ${fmt(sum)} 和總額 ${fmt(total)} 不一樣，請再確認。` : '已儲存預算。');
     }
     case 'addCat': {
