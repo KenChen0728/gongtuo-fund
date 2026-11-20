@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.19.15';
+const VERSION = '2026.11.20.1';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -80,6 +80,15 @@ const vouchersOf = (y, m) => vouchers().filter(v => v.y === y && v.m === m);
 const isMeritV = v => v.kind === 'hr' && (v.hrType === 'merit' || /考核獎金/.test(v.desc || ''));
 const isExtV = v => v.kind === 'inv' && (/外聘督導/.test(v.cat || '') || (v.ids || []).some(id => /外聘督導/.test((S().invoices.find(x => x.id === id) || {}).cat || '')));
 const rcvKind = v => v.kind === 'hr' ? (isBdayV(v) ? 'bday' : isMeritV(v) ? 'merit' : '') : isExtV(v) ? 'ext' : '';
+const rcvTodo = (y, m) => vouchersOf(y, m).filter(v => rcvKind(v) && !v.printed);   // 要附領據、還沒印的
+const printBtn = v => `<button type="button" class="edit${rcvKind(v) && !v.printed ? ' now' : ''}" data-printv="${esc(v.no)}">${rcvKind(v) ? '列印＋領據' : '列印'}</button>`;
+const rcvPill = v => rcvKind(v) ? `<span class="pill ${v.printed ? 'p-rcv' : 'p-todo'}">${v.printed ? '附領據・已印' : '領據還沒填印'}</span>` : '';
+// 人事費頁、憑證頁上方：還沒填印的領據，一張一顆按鈕
+function rcvTodoBox(y, m) {
+  const list = rcvTodo(y, m); if (!list.length) return '';
+  return `<div class="status info rcvtodo"><b>有 ${list.length} 張要附領據的憑證還沒填寫列印</b>（生日禮金、考核獎金、外聘督導費）。按「列印＋領據」可以填領款人的地址、身分證字號後印出，也可以留空給本人手寫。
+   <div class="list" style="margin-top:8px">${list.map(v => `<div class="row"><div class="main"><div class="title">${esc(v.no)}　${esc(v.desc)}</div><div class="meta"><span>${esc(v.kind === 'inv' ? payeeLabel(v) : v.payee)}</span></div></div><span class="amount">${fmt(v.amount)}</span>${printBtn(v)}</div>`).join('')}</div></div>`;
+}
 const printableOf = (y, m) => vouchersOf(y, m).filter(v => v.kind === 'inv' || rcvKind(v)).sort((a, b) => a.no.localeCompare(b.no));
 const unprintedAll = () => vouchers().filter(v => v.kind === 'inv' && !v.printed);
 const pre = (y, m) => N.code + y + String(m).padStart(2, '0');
@@ -171,11 +180,22 @@ function receiptNos(y, m, kids) {
   let n = rcptNext(y);
   return kids.map(k => { if (fixed[k.id]) return fixed[k.id]; while (used.has(n) || skip.has(n)) n++; used.add(n); return n++; });
 }
+/* 薪資：amount 是薪資總額。拆單（split）時 wb 是委辦費-人事費付的，其餘（總額−wb）是營運收入支應-人事費，
+   另外有一張「薪資(2)」人事憑證（編號接在後面）。舊資料：amount 是委辦那一份，另有薪資(2) 憑證 */
+const split2Of = (y, m, name) => vouchersOf(y, m).find(v => v.kind === 'hr' && v.payee === name && (v.hrType === 'split' || /薪資\(2\)$/.test(v.desc || '')));
+const payAmt = r => r.split ? +r.wb || 0 : +r.amount || 0;                 // 這一列算在 paySrc 的金額（拆單的營運那份在薪資(2) 憑證）
+const paySrc = r => r.split ? '委辦費-人事費' : r.src;
+function payView(y, m, r) {          // 畫面用：總額、是否拆單、委辦付多少
+  if (r.split) return { total: +r.amount || 0, split: true, wb: +r.wb || 0 };
+  const v2 = monthDoc(y, m).payroll && split2Of(y, m, r.name);
+  return v2 ? { total: (+r.amount || 0) + (+v2.amount || 0), split: true, wb: +r.amount || 0 } : { total: r.amount, split: false, wb: '' };
+}
 function payrollRows(y, m) {
   const d = monthDoc(y, m);
   if (d.payroll) return d.payroll;
   const prev = shiftYM(y, m, -1), pd = monthDoc(prev.y, prev.m).payroll || [];
-  return (N.staff || []).map(name => { const p = pd.find(r => r.name === name); return { name, src: p ? p.src : '委辦費-人事費', amount: p ? p.amount : '' }; });
+  // 還沒存的月份：照上個月帶（含拆單）
+  return (N.staff || []).map(name => { const p = pd.find(r => r.name === name); return p ? { name, src: p.src, amount: p.amount, ...(p.split ? { split: true, wb: p.wb } : {}) } : { name, src: '委辦費-人事費', amount: '' }; });
 }
 const yearMonths = () => Object.values(S().months).filter(d => d.y === CY);
 /* ===== 年度經費報表（照萬丹 115 年「每月報表」的列別） =====
@@ -199,7 +219,7 @@ function addIncomes(r, list) {
 }
 function addPayroll(r, y, m) {
   const d = monthDoc(y, m);
-  for (const p of d.payroll || []) r[p.src === '委辦費-人事費' ? 'wbHR' : 'opHR'] += +p.amount || 0;
+  for (const p of d.payroll || []) r[paySrc(p) === '委辦費-人事費' ? 'wbHR' : 'opHR'] += payAmt(p);
   if (d.payroll) r.wbBiz += +(d.supervisor ?? N.supervisor) || 0;
 }
 function addVouchers(r, list) {
@@ -270,7 +290,7 @@ function getAlerts() {
   if (needAllBk()) a.push({ go: 'bkall', t: `月底備份：請下載四間公托的每月報表和備份，存到電腦或雲端硬碟，萬一系統出問題資料還在。` });
   if (+N.wbPersonBudget > 0) {
     const remain = N.wbPersonBudget - wbPersonUsed();
-    const cur = payrollRows(CY, CM).filter(r => r.src === '委辦費-人事費').reduce((x, r) => x + (+r.amount || 0), 0);
+    const cur = payrollRows(CY, CM).filter(r => paySrc(r) === '委辦費-人事費').reduce((x, r) => x + payAmt(r), 0);
     if (cur > 0 && remain < cur) a.push({ go: 'staff', t: `委辦人事費剩 ${fmt(remain)} 元，不夠支付本月薪資約 ${fmt(cur)} 元，這個月要拆單。` });
   }
   const low = lowItems();
@@ -427,14 +447,15 @@ const NAMES = { home: '本月', inv: '發票', fee: '月費與收據', report: '
 const IN_MORE = ['vou', 'cash', 'staff', 'trash', 'set', 'help'];
 let view = 'home', sel = new Set(), invFilter = 'all', cashTab = 'list';
 const cashOff = new Set();          // 本期沒勾選、這次先不結算的發票（預設全部勾選）
+const guardView = () => view === 'set' || view === 'staff' || view === 'report';
 const SEL_M = { vou: { y: CY, m: CM }, fee: { y: CY, m: CM }, staff: { y: CY, m: CM }, food: { y: CY, m: CM } };
 // 設定、人事費改到一半就要離開時，先問一下
 function leaveGuard(next) {
-  if (!(dirty && (view === 'set' || view === 'staff'))) return next();
+  if (!(dirty && guardView())) return next();
   ask('還沒儲存', `<p class="hint">這一頁有修改還沒按「儲存」，離開的話這些修改不會留下來。</p>`, () => { dirty = false; setTimeout(next, 0) }, '不儲存，離開', 'btn danger');
 }
 function go(v, force) {
-  if (!force && v !== view && dirty && (view === 'set' || view === 'staff')) return leaveGuard(() => go(v, true));
+  if (!force && v !== view && dirty && guardView()) return leaveGuard(() => go(v, true));
   dirty = false; if (v !== view) FP = null;
   document.querySelectorAll('dialog[open]').forEach(d => { if (d.id !== 'dlgAlert') d.close() });
   view = v; $('#app').dataset.view = v; $('#pageName').textContent = NAMES[v]; $('#helpQ').hidden = v === 'help';
@@ -470,7 +491,7 @@ function monthNav(key) {
 }
 function bar(name, used, budget) {
   const p = pct(used, budget), cls = p >= 95 ? 'bad' : p >= 85 ? 'warn' : '';
-  if (!budget) return `<div><span class="title">${name}</span><div class="meta">還沒輸入今年預算，請到「設定 → 委辦費預算」填寫。</div></div>`;
+  if (!budget) return `<div><span class="title">${name}</span><div class="meta">還沒輸入今年預算，請到「報表 → 委辦費預算與挪用 → 設定預算」填寫。</div></div>`;
   return `<div><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span class="title">${name}</span><span class="meta" style="margin:0">已用 <b class="${cls ? 'when-' + cls : ''}">${p}%</b>・剩 ${fmt(budget - used)} 元</span></div><div class="kpibar ${cls}"><i style="width:${Math.min(p, 100)}%"></i></div></div>`;
 }
 
@@ -481,18 +502,19 @@ function home() {
   if (!N.director) needSetup.push('主任姓名');
   if (!N.pi) needSetup.push('計畫主持人');
   if (!(N.staff || []).length) needSetup.push('員工名單');
-  if (!+N.wbBizTotal) needSetup.push('委辦費預算');
   if (!activeKids().length) needSetup.push('幼兒名單（在「月費」新增）');
+  if (!+N.wbBizTotal) todo.push({ gobud: 1, t: '還沒輸入今年的委辦費預算', m: '到「報表 → 委辦費預算與挪用 → 設定預算」，依契約書填寫' });
   if (open.length) todo.push({ go: 'inv', t: `${open.length} 張發票還沒做憑證`, m: '到「發票」勾選同一類別，合併成憑證' });
   if (unp.length) todo.push({ go: 'vou', t: `${unp.length} 張憑證還沒印`, m: `委辦費 ${unp.filter(isWB).length} 張用一般紙，其他 ${unp.filter(v => !isWB(v)).length} 張用色紙` });
   if (po.length) { const t = po.reduce((a, x) => a + amt(x), 0); todo.push({ go: 'cash', t: `零用金有 ${po.length} 張還沒結算`, m: `合計 ${fmt(t)} 元，餘額 ${fmt(N.petty - t)} 元` }); }
+  { const rt = rcvTodo(CY, CM); if (rt.length) todo.push({ go: rt.every(v => v.kind === 'hr') ? 'staff' : 'vou', t: `${rt.length} 張憑證的領據還沒填寫列印`, m: '生日禮金、考核獎金、外聘督導費要附領款收據，按「列印＋領據」' }); }
   { const miss = bdayMissing(CY, CM); if (miss.length) todo.push({ go: 'staff', t: `本月 ${miss.join('、')} 生日，生日禮金憑證還沒做`, m: '到「人事費」按「儲存本月人事費」會一起建立' }); }
   if (activeKids().length && !monthDoc(CY, CM).rcptPrinted) { const r = receiptDate(CY, CM); todo.push({ go: 'fee', t: `本月收據還沒印（${activeKids().length} 位）`, m: `收據日期 ${r.m}/${r.d}` }); }
   { const xl = monthXR(monthDoc(CY, CM)), due = Object.entries(XR_TYPES).filter(([k, T]) => T.months.includes(CM) && !xl.some(r => r.type === k && r.printed)).map(([, T]) => T.t); if (due.length) todo.push({ go: 'fee', t: `本月要開請款收據：${due.join('、')}`, m: '到「月費」頁下方的「請款收據」填寫並列印' }); }
   $('#view').innerHTML = `
   ${needSetup.length ? `<button type="button" class="card setupcard linkrow" data-go="set" style="text-align:left"><div class="title">第一次使用，請先完成設定</div><div class="meta">還沒填：${needSetup.map(esc).join('、')}</div></button>` : ''}
   <section><h2>要做的事<small>${todo.length} 件</small></h2>
-   ${todo.length ? `<div class="list todo">${todo.map(t => `<button type="button" class="row linkrow" data-go="${t.go}"><div class="main"><div class="title">${esc(t.t)}</div><div class="meta">${esc(t.m)}</div></div><span class="go" aria-hidden="true">›</span></button>`).join('')}</div>` : '<div class="empty">目前沒有要處理的事。</div>'}
+   ${todo.length ? `<div class="list todo">${todo.map(t => `<button type="button" class="row linkrow" ${t.gobud ? 'data-gobud="1"' : `data-go="${t.go}"`}><div class="main"><div class="title">${esc(t.t)}</div><div class="meta">${esc(t.m)}</div></div><span class="go" aria-hidden="true">›</span></button>`).join('')}</div>` : '<div class="empty">目前沒有要處理的事。</div>'}
   </section>
   <div class="card" style="flex-direction:row;align-items:center;flex-wrap:wrap;gap:8px 12px">
    <div class="main"><div class="title">新增發票的方式：${MODE === 'step' ? '一步一步模式' : '一般模式'}</div><div class="meta">${MODE === 'step' ? '一次問一件事，每一步只按一個按鈕。' : '一個畫面填完所有欄位。'}只影響這台裝置。</div></div>
@@ -575,8 +597,8 @@ function fee() {
   $('#view').innerHTML = `
   <div class="rdate"><label for="rDate">${m} 月收據日期</label><input type="date" id="rDate" value="${isoOf(rd)}" max="9999-12-31">${rd.set ? '<button type="button" class="btn" id="rDateReset">改回預設</button>' : ''}<span class="meta">收據上印「${rocDate(rd)}」。${rd.set ? '這是這個月自己選的日期。' : `預設每月 ${+N.rcptDay || 15} 號，遇週末順延，可以改成別天。`}</span></div>
   <div class="tally"><span>應收<b>${fmt(total)}</b></span><span>收據號碼<b style="font-size:18px">${kids.length ? rcptNo(Math.min(...nos)) + '–' + rcptNo(Math.max(...nos)) : '—'}</b></span><span class="${d.rcptPrinted ? '' : 'warn'}">收據<b style="font-size:18px">${d.rcptPrinted ? '已印' : '還沒印'}</b></span></div>
-  <div class="actions start"><button type="button" class="btn primary" id="printRcptAll" ${kids.length ? '' : 'aria-disabled="true"'}>列印收據</button><button type="button" class="btn" id="addKid">＋ 新增幼兒</button><button type="button" class="btn" id="fpStart" ${FP ? 'aria-pressed="true"' : ''}>勾選收據</button><button type="button" class="btn" id="borrow">協會借用號碼</button></div>
-  ${FP ? '<p class="status info">勾選收據後，可以只印勾選的幾張（按下方「列印勾選的」，號碼從下一號依序給勾選的），或在下方選日期後按「套用日期」改日期。</p>' : ''}
+  <div class="actions start"><button type="button" class="btn primary" id="printRcptAll" ${kids.length ? '' : 'aria-disabled="true"'}>列印收據</button><button type="button" class="btn" id="addKid">＋ 新增幼兒</button><button type="button" class="btn" id="fpStart" ${FP ? 'aria-pressed="true"' : ''}>${FP ? '✓ 勾選多張中' : '勾選多張（改日期／一起印）'}</button><button type="button" class="btn" id="borrow">協會借用號碼</button></div>
+  ${FP ? `<div class="status info"><b>已勾 <span id="fpTopCount">${FP.size}</span> 張。</b>勾好之後在畫面最下方：<br>・要<b>一起印</b>：按「列印勾選的」，號碼從下一號依序給勾選的。<br>・要<b>改日期</b>：選日期後按「套用日期」，只改勾選的這幾張，沒勾的維持 ${md(rd)}。<br>只印一張的話，不用勾選，直接按那位孩子的「印這張」。</div>` : ''}
   <p class="hint">名單沿用上個月，月費和餐點費依上課天數和生日自動算。有延托、保險、退費的孩子，按「修改」再填。${d.rcptPrinted ? '印過的號碼不會再變；之後新增的孩子會用新的號碼。' : '收據號碼在列印時確定，印之前可能會變。'}</p>
   ${earlierUnprinted(y, m) ? `<p class="status">${earlierUnprinted(y, m)} 月的收據還沒印。先印這個月的話，${earlierUnprinted(y, m)} 月的號碼會排在這個月後面。</p>` : ''}
   ${kids.length ? `<div class="list">${kids.map((k, i) => {
@@ -585,18 +607,17 @@ function fee() {
     ex.push(`月費 ${fmt(c.fee)}${c.ovFee ? '（手改）' : ''}`); ex.push(c.meal || c.ovMeal ? `餐點費 ${fmt(c.meal)}${c.ovMeal ? '（手改）' : ''}` : '未滿 6 個月不收餐點費');
     if (+f.late) ex.push(`延托 ${fmt(f.late)}`); if (+f.ins) ex.push(`保險 ${fmt(f.ins)}`);
     const own = (d.kidDates || {})[k.id] && kidRcptDate(y, m, k.id);
-    return `<div class="row">${fpTick('k:' + k.id, k.name)}<div class="main"><div class="title">${k.seat}. ${esc(k.name)}${k.active === false ? ' <span class="pill p-todo">已離開</span>' : ''}</div><div class="meta"><span>收據 ${rcptNo(nos[i])}</span>${own ? `<span class="when-warn">日期 ${md(own)}</span>` : ''}${ex.map(e => `<span>${e}</span>`).join('')}${+f.refund ? `<span class="when-bad">退費 ${fmt(f.refund)}</span>` : ''}</div></div><span class="amount">${fmt(c.total)}</span><button type="button" class="edit" data-kid="${k.id}">修改</button></div>`
+    return `<div class="row">${fpTick('k:' + k.id, k.name)}<div class="main"><div class="title">${k.seat}. ${esc(k.name)}${k.active === false ? ' <span class="pill p-todo">已離開</span>' : ''}</div><div class="meta"><span>收據 ${rcptNo(nos[i])}</span><span class="${own ? 'when-warn' : ''}">日期 ${md(own || kidRcptDate(y, m, k.id))}${own ? '（自己改的）' : ''}</span>${(d.rcptNos || {})[k.id] ? '<span class="pill p-done">已印</span>' : ''}${ex.map(e => `<span>${e}</span>`).join('')}${+f.refund ? `<span class="when-bad">退費 ${fmt(f.refund)}</span>` : ''}</div></div><span class="amount">${fmt(c.total)}</span><div class="acts"><button type="button" class="edit" data-kid="${k.id}">修改</button><button type="button" class="edit" data-rcpt1="${k.id}">印這張</button></div></div>`
   }).join('')}</div>` : `<div class="empty">${ymNum(y, m) >= CYM ? '還沒有幼兒名單。按「＋ 新增幼兒」，輸入座號、姓名和生日。' : '這個月沒有月費紀錄。'}</div>`}
   ${xrSection(y, m, d)}
   <section><h2>備註<small>自動編號，列在月費表下方</small></h2>
    <div class="list">${monthNotes(d).map((n, i) => { const k = S().kids.find(x => x.id === n.kid); return `<div class="row"><div class="main"><div class="title">${i + 1}. ${esc(k ? k.name : '')} ${esc(n.text)}</div></div><button type="button" class="edit" data-delnote="${esc(n.key)}">刪除</button></div>` }).join('') || '<div class="row"><div class="main meta">還沒有備註。</div></div>'}</div>
   </section>
   ${rcptSkip(y).length ? `<p class="hint">${y} 年已標記協會借用：${rcptSkip(y).slice(-10).map(rcptNo).join('、')} 號，收據會跳過這些號碼。</p>` : ''}
-  ${FP ? `<div style="height:150px"></div><div class="mergebar" id="fpBar"><div class="main"><div class="title" id="fpCount">已選 ${FP.size} 張</div></div>
-    <label class="fpdate">日期<input type="date" id="fpDate" value="${FPD || isoOf(rd)}" max="9999-12-31"></label>
-    <button type="button" class="btn" id="fpApply" aria-disabled="${!FP.size}">套用日期</button>
-    <button type="button" class="btn" id="fpAll">${kids.length && kids.every(k => FP.has('k:' + k.id)) ? '全部不選' : '全選月費'}</button><button type="button" class="btn" id="fpCancel">取消</button>
-    <button type="button" class="btn primary" id="fpPrint" aria-disabled="${![...FP].some(id => id.startsWith('k:'))}">列印勾選的</button></div>` : ''}`;
+  ${FP ? `<div style="height:190px"></div><div class="mergebar fpbar" id="fpBar"><div class="fprow"><div class="title" id="fpCount">已勾 ${FP.size} 張</div>
+    <button type="button" class="btn" id="fpAll">${kids.length && kids.every(k => FP.has('k:' + k.id)) ? '全部不選' : '全選月費'}</button><button type="button" class="btn" id="fpCancel">結束勾選</button></div>
+    <div class="fprow"><span class="fplab">改日期</span><label class="fpdate"><span class="sr">日期</span><input type="date" id="fpDate" value="${FPD || isoOf(rd)}" max="9999-12-31"></label><button type="button" class="btn" id="fpApply" aria-disabled="${!FP.size}">套用日期</button>
+    <button type="button" class="btn primary" id="fpPrint" aria-disabled="${![...FP].some(id => id.startsWith('k:'))}">列印勾選的</button></div></div>` : ''}`;
 }
 // 印月費收據：kids 可以是全部或勾選的幾位。號碼照名單順序算，勾選的先拿到號碼；全部都印過才算「已印」
 function printReceipts(y, m, kids, hasXr) {
@@ -616,7 +637,7 @@ function printReceipts(y, m, kids, hasXr) {
 // 勾選改日期：FP 是勾選的收據（k:幼兒 id、x:請款收據 id），FPD 是選的日期
 let FP = null, FPD = '';
 const fpTick = (id, name) => FP ? `<button type="button" class="tick" role="checkbox" aria-checked="${FP.has(id)}" data-fpick="${esc(id)}" aria-label="選取 ${esc(name)}"><i>✓</i>選取</button>` : '';
-function fpSync() { const { y, m } = SEL_M.fee, ks = monthKids(y, m); $('#fpCount').textContent = `已選 ${FP.size} 張`; $('#fpApply').setAttribute('aria-disabled', String(!FP.size)); $('#fpPrint').setAttribute('aria-disabled', String(![...FP].some(id => id.startsWith('k:')))); $('#fpAll').textContent = ks.length && ks.every(k => FP.has('k:' + k.id)) ? '全部不選' : '全選月費'; document.querySelectorAll('[data-fpick]').forEach(b => b.setAttribute('aria-checked', FP.has(b.dataset.fpick))) }
+function fpSync() { const { y, m } = SEL_M.fee, ks = monthKids(y, m); $('#fpCount').textContent = `已勾 ${FP.size} 張`; if ($('#fpTopCount')) $('#fpTopCount').textContent = FP.size; $('#fpApply').setAttribute('aria-disabled', String(!FP.size)); $('#fpPrint').setAttribute('aria-disabled', String(![...FP].some(id => id.startsWith('k:')))); $('#fpAll').textContent = ks.length && ks.every(k => FP.has('k:' + k.id)) ? '全部不選' : '全選月費'; document.querySelectorAll('[data-fpick]').forEach(b => b.setAttribute('aria-checked', FP.has(b.dataset.fpick))) }
 function fpApply() {
   const { y, m } = SEL_M.fee, iso = $('#fpDate').value, r = fromISO(iso), d = monthDoc(y, m);
   if (!r) return toast('請選日期。'); if (!FP.size) return toast('請先勾選收據。');
@@ -728,6 +749,21 @@ function undoMove(id) {
   store.setSettings({ budget: B, wbMoves: (N.wbMoves || []).filter(x => x.id !== id) }).catch(fail());
   toast(`已還原：${r.to}的 ${fmt(r.amount)} 元還給${r.from}。`);
 }
+// 報表頁「委辦費預算與挪用」：設定預算（原本在設定頁）
+let BUD_OPEN = false;
+function budgetEditor() {
+  const B = N.budget || {}, U = N.usedBefore || {}, bsum = wbItems().reduce((a, k) => a + (+B[k] || 0), 0);
+  return `  <details class="card pickbox" id="budBox" ${!+N.wbBizTotal || BUD_OPEN ? 'open' : ''}><summary>設定預算（每年 1/1 依契約書輸入）</summary>
+   <div class="two"><label>委辦人事費<input type="number" id="sPB" inputmode="numeric" value="${N.wbPersonBudget || ''}"></label><label>系統啟用前已用的人事費<input type="number" id="sPU" inputmode="numeric" value="${N.wbPersonUsedBefore || ''}"></label></div>
+   <div class="two"><label>委辦業務費總額<input type="number" id="sBT" inputmode="numeric" value="${N.wbBizTotal || ''}"></label><label>${CY}年度行管費<input type="number" id="sAdm" inputmode="numeric" value="${N.admBudget || ''}"></label></div>
+   <p class="hint" style="font-size:14px">各細項預算加總要等於業務費總額。年中要挪用時，建議用上方的「挪用預算」，會留下紀錄；也可以直接在這裡改兩個項目的預算。「啟用前已用」只有今年開始使用系統前已經花掉的金額要填。</p>
+   <div class="tablewrap bgrid"><table><thead><tr><th>項目</th><th>預算</th><th>啟用前已用</th></tr></thead><tbody>
+    ${wbItems().map((k, i) => `<tr><td>${k}</td><td><input type="number" inputmode="numeric" data-bud="${i}" value="${B[k] || ''}"></td><td><input type="number" inputmode="numeric" data-used="${i}" value="${U[k] || ''}"></td></tr>`).join('')}
+   </tbody><tfoot><tr><td>細項合計</td><td id="bSum">${fmt(bsum)}</td><td></td></tr></tfoot></table></div>
+   <p class="err" id="bWarn" ${bsum && +N.wbBizTotal && bsum !== +N.wbBizTotal ? '' : 'hidden'}>細項合計和業務費總額不一樣，請再確認。</p>
+   <div class="actions start"><button type="button" class="btn primary" id="saveBudget">儲存預算</button></div>
+  </details>`;
+}
 function report() {
   const A = annual(CY), mu = manualUntil(CY);
   const wbB = +N.wbBizTotal || 0, wbU = wbBizUsed();
@@ -749,13 +785,16 @@ function report() {
    <div class="list">${inc.map(x => `<div class="row"><div class="main"><div class="title">${x.m} 月・${esc(x.source === '縣府補助款' && x.label ? x.label : x.source)}</div>${x.note ? `<div class="meta">${esc(x.note)}</div>` : ''}</div><span class="amount">${fmt(x.amount)}</span><button type="button" class="edit" data-delincome="${x.id}">刪除</button></div>`).join('') || `<div class="row"><div class="main meta">${mu ? `${mu + 1} 月起還沒有撥款收入。` : '今年還沒有撥款收入。'}</div></div>`}</div>
    <div class="actions start"><button type="button" class="btn" id="addIncome">＋ 新增撥款收入</button></div>
   </section>
-  ${(() => { const low = lowItems(); return low.length ? `<section><h2>委辦業務費不夠用的項目<small>按「補足」從還有餘額的項目挪過去</small></h2><div class="list">${low.map(k => { const r = wbLeft(k); return `<div class="row"><div class="main"><div class="title">${esc(k)}</div><div class="meta"><span class="${r < 0 ? 'when-warn' : ''}">${r < 0 ? `超支 ${fmt(-r)} 元` : `只剩 ${fmt(r)} 元`}</span></div></div><button type="button" class="edit" data-move="${esc(k)}">補足</button></div>` }).join('')}</div></section>` : '' })()}
+  <section id="budSec"><h2>委辦費預算與挪用<small>各項預算、挪用額度都在這裡改</small></h2>
+  ${(() => { const low = lowItems(); return low.length ? `<section><h2 style="font-size:16px">不夠用的項目<small>按「補足」從還有餘額的項目挪過去</small></h2><div class="list">${low.map(k => { const r = wbLeft(k); return `<div class="row"><div class="main"><div class="title">${esc(k)}</div><div class="meta"><span class="${r < 0 ? 'when-warn' : ''}">${r < 0 ? `超支 ${fmt(-r)} 元` : `只剩 ${fmt(r)} 元`}</span></div></div><button type="button" class="edit" data-move="${esc(k)}">補足</button></div>` }).join('')}</div></section>` : '' })()}
   <details class="card pickbox" ${lowItems().length || wbMoves().length ? 'open' : ''}><summary>委辦業務費細項（${wbItems().length} 項）</summary>
-  ${mu ? `<p class="hint" style="font-size:14px">1–${mu} 月是補登的總數，沒有分細項；細項的「已用」要在「設定 → 委辦費預算 → 啟用前已用」填各項目 1–${mu} 月用掉的金額。</p>` : ''}
-  <div class="tablewrap"><table><thead><tr><th>項目</th><th class="num">預算</th><th class="num">已用</th><th class="num">剩餘</th><th style="min-width:120px">使用率</th></tr></thead>
+  ${mu ? `<p class="hint" style="font-size:14px">1–${mu} 月是補登的總數，沒有分細項；細項的「已用」要在下方「設定預算」的「啟用前已用」填各項目 1–${mu} 月用掉的金額。</p>` : ''}
+  <div class="tablewrap"><table class="wbtable"><thead><tr><th>項目</th><th class="num">預算</th><th class="num">已用</th><th class="num">剩餘</th><th style="min-width:120px">使用率</th></tr></thead>
   <tbody>${wbItems().map(k => { const u = wbUsed(k), b = +(N.budget || {})[k] || 0, p = pct(u, b), cls = p >= 100 ? 'bad' : p >= 90 ? 'warn' : ''; return `<tr><td>${k}</td><td class="num">${fmt(b)}</td><td class="num">${fmt(u)}</td><td class="num ${b - u < 0 ? 'neg' : ''}">${fmt(b - u)}</td><td><div class="kpibar ${cls}"><i style="width:${Math.min(p, 100)}%"></i></div><span class="meta" style="margin:0">${b ? p + '%' : '—'}</span></td></tr>` }).join('')}</tbody></table></div>
   ${wbMoves().length ? `<div style="font-weight:700">挪用紀錄</div><div class="list">${wbMoves().slice().reverse().map(x => `<div class="row"><div class="main"><div class="title">${esc(x.from)} → ${esc(x.to)}</div><div class="meta"><span>${esc(x.date)}</span></div></div><span class="amount">${fmt(x.amount)}</span><button type="button" class="edit" data-unmove="${esc(x.id)}">還原</button></div>`).join('')}</div>` : ''}
-  <div class="actions start"><button type="button" class="btn" data-move="">挪用預算</button><button type="button" class="btn" data-go="set">調整預算</button></div></details>`;
+  <div class="actions start"><button type="button" class="btn primary" data-move="">挪用預算</button><button type="button" class="btn" data-gobud="1">設定預算</button></div></details>
+  ${budgetEditor()}
+  </section>`;
 }
 // 補登月份另外加了哪些：列給使用者核對
 function addedNote(y) {
@@ -783,10 +822,10 @@ function vou() {
   <p class="hint">還沒印的會先勾好；印過的要補印，再自己勾起來。一頁印一張，先印委辦費（一般紙），再印其他經費來源（色紙）。01 到 ${String(N.reserved).padStart(2, '0')} 保留給${esc(N.firstItem)}和薪資。</p>
   ${pay.length ? `<details class="card pickbox"><summary>人事費（01–${String(pay.length + 1).padStart(2, '0')}，清冊另外製作）</summary><div class="list">
     <div class="row"><div class="main"><div class="title"><span class="amount">${pre(y, m)}01</span>　${esc(N.firstItem)}</div><div class="meta">${pill('委辦費-業務費')}</div></div><span class="amount">${fmt(d.supervisor ?? N.supervisor)}</span></div>
-    ${pay.map((r, i) => `<div class="row"><div class="main"><div class="title"><span class="amount">${pre(y, m)}${String(i + 2).padStart(2, '0')}</span>　${esc(r.name)} ${y}年${m}月薪資</div><div class="meta">${pill(r.src)}</div></div><span class="amount">${fmt(r.amount)}</span></div>`).join('')}</div></details>` : ''}
+    ${pay.map((r, i) => `<div class="row"><div class="main"><div class="title"><span class="amount">${pre(y, m)}${String(i + 2).padStart(2, '0')}</span>　${esc(r.name)} ${y}年${m}月薪資</div><div class="meta">${pill(paySrc(r))}${r.split ? `<span>拆單：總額 ${fmt(r.amount)}，營運那份在薪資(2)</span>` : ''}</div></div><span class="amount">${fmt(payAmt(r))}</span></div>`).join('')}</div></details>` : ''}
   ${list.length ? `<div class="list">${list.map(v => `<div class="row"><div class="main"><div class="title"><span class="amount">${esc(v.no)}</span>　${esc(v.desc)}</div>
-    <div class="meta">${pill(v.src)}<span>受款人：${esc(v.kind === 'inv' ? payeeLabel(v) : v.payee)}</span>${v.kind === 'inv' || rcvKind(v) ? `${v.printed ? `<span class="pill p-done">已印 ${esc(v.printedAt)}</span>` : '<span class="pill p-todo">還沒印</span>'}<span>${isWB(v) ? '一般紙' : '色紙'}</span>` : '<span>另外製作</span>'}${v.note ? '<span>有備註</span>' : ''}${v.printed && v.amountPrinted != null && v.amountPrinted !== v.amount ? `<span class="when-warn">印後改過金額（紙本是 ${fmt(v.amountPrinted)}）</span>` : ''}</div></div>
-    <span class="amount">${fmt(v.amount)}</span><div class="acts">${v.kind === 'inv' ? `<button type="button" class="edit" data-vinv="${esc(v.no)}">修改</button>` : ''}${v.kind === 'inv' || rcvKind(v) ? `<button type="button" class="edit" data-printv="${esc(v.no)}">列印</button>` : ''}<button type="button" class="edit" data-cancelv="${esc(v.no)}">取消</button></div></div>`).join('')}</div>` : '<div class="empty">這個月還沒有憑證。到「發票」勾選發票，就能合併成憑證。</div>'}`;
+    <div class="meta">${pill(v.src)}<span>受款人：${esc(v.kind === 'inv' ? payeeLabel(v) : v.payee)}</span>${v.kind === 'inv' || rcvKind(v) ? `${v.printed ? `<span class="pill p-done">已印 ${esc(v.printedAt)}</span>` : '<span class="pill p-todo">還沒印</span>'}${rcvKind(v) ? '<span class="pill p-rcv">附領據</span>' : ''}<span>${isWB(v) ? '一般紙' : '色紙'}</span>` : '<span>另外製作</span>'}${v.note ? '<span>有備註</span>' : ''}${v.printed && v.amountPrinted != null && v.amountPrinted !== v.amount ? `<span class="when-warn">印後改過金額（紙本是 ${fmt(v.amountPrinted)}）</span>` : ''}</div></div>
+    <span class="amount">${fmt(v.amount)}</span><div class="acts">${v.kind === 'inv' ? `<button type="button" class="edit" data-vinv="${esc(v.no)}">修改</button>` : ''}${v.kind === 'inv' || rcvKind(v) ? printBtn(v) : ''}<button type="button" class="edit" data-cancelv="${esc(v.no)}">取消</button></div></div>`).join('')}</div>` : '<div class="empty">這個月還沒有憑證。到「發票」勾選發票，就能合併成憑證。</div>'}`;
 }
 const pettyPicked = () => sortPetty(pettyOpen()).filter(x => !cashOff.has(x.id));
 const nextSettleN = () => Math.max(0, ...S().settlements.filter(s => s.y === CY && s.m === CM).map(s => +s.n || 0)) + 1;
@@ -821,16 +860,21 @@ function staff() {
   const remain = (+N.wbPersonBudget || 0) - wbPersonUsed();
   const hr = vouchersOf(y, m).filter(v => v.kind === 'hr');
   $('#headExtra').innerHTML = monthNav('staff');
-  $('#view').innerHTML = `
-  <div class="card">${bar('委辦人事費', wbPersonUsed(), +N.wbPersonBudget || 0)}${N.wbPersonBudget && remain < rows.filter(r => r.src === '委辦費-人事費').reduce((a, r) => a + (+r.amount || 0), 0) ? `<p class="hint" style="font-size:15px">委辦人事費不夠這個月的薪資：選一位按「拆單」，填好委辦費付多少，其餘自動改由營運收入支應-人事費。</p>` : ''}</div>
+  $('#view').innerHTML = `${rcvTodoBox(y, m)}
+  <div class="card">${bar('委辦人事費', wbPersonUsed(), +N.wbPersonBudget || 0)}${N.wbPersonBudget && remain < rows.filter(r => r.src === '委辦費-人事費').reduce((a, r) => a + (+r.amount || 0), 0) ? `<p class="hint" style="font-size:15px">委辦人事費不夠這個月的薪資：選一位按「拆單」，在 ① 填委辦費付多少，② 營運收入支應-人事費會自動算出（總額減委辦）。</p>` : ''}</div>
   ${!(N.staff || []).length ? '<div class="empty">還沒有員工名單，請先到「設定 → 員工名單」填寫。</div>' : `
-  <p class="hint">薪資清冊另外製作，這裡只輸入金額，改完按「儲存本月人事費」。編號前面都是 ${pre(y, m)}。${saved ? '' : '<b>這個月還沒儲存。</b>'}</p>
+  <p class="hint">薪資清冊另外製作，這裡填每位員工的<b>薪資總額</b>，改完按「儲存本月人事費」。委辦人事費不夠時按「拆單」，填委辦費付多少，其餘自動算成營運收入支應。編號前面都是 ${pre(y, m)}。${saved ? '' : '<b>這個月還沒儲存。</b>'}</p>
   <div class="list paylist">
    <div class="row"><div class="main"><div class="title"><span class="amount">01</span>　${esc(N.pi || '（請到設定填計畫主持人）')}</div><div class="meta">${esc(N.firstItem)}・${pill('委辦費-業務費')}</div></div>
     <label class="payamt">金額<input type="number" inputmode="numeric" id="supAmt" value="${d.supervisor ?? N.supervisor}"></label></div>
-   ${rows.map((r, i) => `<div class="row"><div class="main"><div class="title"><span class="amount">${String(i + 2).padStart(2, '0')}</span>　${esc(r.name)}</div>
-    <select data-psrc="${i}" aria-label="${esc(r.name)} 經費來源"><option ${r.src === '委辦費-人事費' ? 'selected' : ''}>委辦費-人事費</option><option ${r.src === '營運收入支應-人事費' ? 'selected' : ''}>營運收入支應-人事費</option></select></div>
-    <label class="payamt">金額<input type="number" inputmode="numeric" value="${r.amount}" data-pamt="${i}"></label><button type="button" class="edit" data-split="${i}">拆單</button></div>`).join('')}
+   ${rows.map((r, i) => { const pv = payView(y, m, r), v2 = split2Of(y, m, r.name); return `<div class="row payrow"><div class="main"><div class="title"><span class="amount">${String(i + 2).padStart(2, '0')}</span>　${esc(r.name)}</div>
+    <select data-psrc="${i}" aria-label="${esc(r.name)} 經費來源" ${pv.split ? 'hidden' : ''}><option ${r.src === '委辦費-人事費' ? 'selected' : ''}>委辦費-人事費</option><option ${r.src === '營運收入支應-人事費' ? 'selected' : ''}>營運收入支應-人事費</option></select><span class="meta" data-splitlab="${i}" ${pv.split ? '' : 'hidden'}>委辦＋營運收入支應（拆單）</span></div>
+    <label class="payamt">薪資總額<input type="number" inputmode="numeric" value="${pv.total}" data-pamt="${i}"></label><button type="button" class="edit" data-split="${i}" aria-pressed="${pv.split}">${pv.split ? '取消拆單' : '拆單'}</button>
+    <div class="splitbox" data-splitbox="${i}" ${pv.split ? '' : 'hidden'}>
+     <label class="payamt">① 委辦費-人事費付<input type="number" inputmode="numeric" value="${pv.split ? pv.wb : ''}" data-pwb="${i}"></label>
+     <div class="payamt">② 營運收入支應-人事費付（自動）<b data-pop="${i}">${pv.split ? fmt(pv.total - pv.wb) : '—'}</b></div>
+     ${v2 ? `<div class="meta" style="flex-basis:100%">營運那份的憑證：${esc(v2.no)}</div>` : ''}
+    </div></div>` }).join('')}
   </div>
   ${rows.length + 1 > N.reserved ? `<p class="err">員工人數超過保留的編號（${N.reserved} 個），請到設定調整。</p>` : ''}
   ${(() => { const bs = bdayStaff(m), miss = bdayMissing(y, m); if (!bs.length) return ''; return (miss.length ? `<div class="status info" style="margin-top:8px">本月生日：${miss.map(esc).join('、')}。按「儲存本月人事費」時會一起建立生日禮金憑證（每張 ${fmt(bdayAmt())} 元）。</div>` : `<p class="hint" style="font-size:15px">本月生日禮金已建立：${bs.map(esc).join('、')}。</p>`) })()}
@@ -842,7 +886,7 @@ function staff() {
   ${(N.staff || []).length ? meritSection(y, m) : ''}
   <section><h2>其他人事支出<small>編號自動接在這個月最新一號之後</small></h2>
    <div class="actions start"><button type="button" class="btn" data-hr="bday">＋ 生日禮金</button><button type="button" class="btn" data-hr="sub">＋ 代班薪資</button><button type="button" class="btn" data-hr="bonus">＋ 年終獎金</button></div>
-   ${hr.length ? `<div class="list">${hr.map(v => `<div class="row"><div class="main"><div class="title"><span class="amount">${esc(v.no)}</span>　${esc(v.desc)}</div><div class="meta">${pill(v.src)}<span>${esc(v.payee)}</span></div></div><span class="amount">${fmt(v.amount)}</span><div class="acts">${rcvKind(v) ? `<button type="button" class="edit" data-printv="${esc(v.no)}">列印</button>` : ''}<button type="button" class="edit" data-cancelv="${esc(v.no)}">取消</button></div></div>`).join('')}</div><p class="hint" style="font-size:14px">生日禮金、考核獎金按「列印」，會印粘存單和下面的領款收據。</p>` : ''}
+   ${hr.length ? `<div class="list">${hr.map(v => `<div class="row"><div class="main"><div class="title"><span class="amount">${esc(v.no)}</span>　${esc(v.desc)}</div><div class="meta">${pill(v.src)}<span>${esc(v.payee)}</span>${rcvPill(v)}</div></div><span class="amount">${fmt(v.amount)}</span><div class="acts">${rcvKind(v) ? printBtn(v) : ''}<button type="button" class="edit" data-cancelv="${esc(v.no)}">取消</button></div></div>`).join('')}</div><p class="hint" style="font-size:14px">生日禮金、考核獎金按「列印＋領據」，先填領款收據（地址、身分證可以留空給本人手寫），再印粘存單和下面的領款收據。</p>` : ''}
   </section>`;
 }
 function trash() {
@@ -853,8 +897,6 @@ function trash() {
   <section><h2>取消的憑證<small>${dv.length} 張</small></h2>${dv.length ? `<div class="list">${dv.map(v => `<div class="row"><div class="main"><div class="title">${esc(v.no)}　${esc(v.desc)}</div><div class="meta"><span>還剩 ${left(v.deletedAt)} 天</span></div></div><span class="amount">${fmt(v.amount)}</span><div class="acts"><button type="button" class="edit" data-restorev="${esc(v.no)}">救回</button><button type="button" class="edit" data-purgev="${esc(v.no)}">永久刪除</button></div></div>`).join('')}</div><p class="hint" style="font-size:15px">取消的憑證編號不會再用到。要讓下一張新憑證沿用同一個編號，按「永久刪除」。</p>` : '<div class="empty">沒有取消的憑證。</div>'}</section>`;
 }
 function set() {
-  const B = N.budget || {}, U = N.usedBefore || {};
-  const bsum = wbItems().reduce((a, k) => a + (+B[k] || 0), 0);
   $('#view').innerHTML = `
   <section><h2>新增發票的方式<small>只影響這台裝置，兩種方式存下來的資料完全一樣</small></h2>
    <div class="bigopts">
@@ -888,16 +930,7 @@ function set() {
    <div class="two"><label>優化比收據繳款人<input type="text" id="sPayGov" value="${esc(N.payGov || '屏東縣政府')}"></label><label>契約價金收據繳款人<input type="text" id="sPayAssoc" value="${esc(N.payAssoc || '中華頭心手希望教育協會')}"></label></div>
    <div class="actions start"><button type="button" class="btn primary" id="saveRcpt">儲存</button></div>
   </details>
-  <details class="card pickbox" ${!+N.wbBizTotal ? 'open' : ''}><summary>委辦費預算（每年 1/1 依契約書輸入）</summary>
-   <div class="two"><label>委辦人事費<input type="number" id="sPB" inputmode="numeric" value="${N.wbPersonBudget || ''}"></label><label>系統啟用前已用的人事費<input type="number" id="sPU" inputmode="numeric" value="${N.wbPersonUsedBefore || ''}"></label></div>
-   <div class="two"><label>委辦業務費總額<input type="number" id="sBT" inputmode="numeric" value="${N.wbBizTotal || ''}"></label><label>${CY}年度行管費<input type="number" id="sAdm" inputmode="numeric" value="${N.admBudget || ''}"></label></div>
-   <p class="hint" style="font-size:14px">各細項預算加總要等於業務費總額。年中要挪用時，到「報表 → 委辦業務費細項」按「挪用預算」，會留下紀錄；也可以直接改兩個項目的預算。「啟用前已用」只有今年開始使用系統前已經花掉的金額要填。</p>
-   <div class="tablewrap bgrid"><table><thead><tr><th>項目</th><th>預算</th><th>啟用前已用</th></tr></thead><tbody>
-    ${wbItems().map((k, i) => `<tr><td>${k}</td><td><input type="number" inputmode="numeric" data-bud="${i}" value="${B[k] || ''}"></td><td><input type="number" inputmode="numeric" data-used="${i}" value="${U[k] || ''}"></td></tr>`).join('')}
-   </tbody><tfoot><tr><td>細項合計</td><td id="bSum">${fmt(bsum)}</td><td></td></tr></tfoot></table></div>
-   <p class="err" id="bWarn" ${bsum && +N.wbBizTotal && bsum !== +N.wbBizTotal ? '' : 'hidden'}>細項合計和業務費總額不一樣，請再確認。</p>
-   <div class="actions start"><button type="button" class="btn primary" id="saveBudget">儲存預算</button></div>
-  </details>
+  <div class="card" style="gap:6px"><div class="title">委辦費預算</div><p class="hint" style="font-size:15px">預算和挪用都移到「報表」頁的「委辦費預算與挪用」，改金額、挪用額度都在那裡。</p><div class="actions start"><button type="button" class="btn" data-gobud="1">到報表改預算</button></div></div>
   <details class="card pickbox"><summary>類別清單（選了類別，經費來源就自動帶出）</summary>
    <p class="hint" style="font-size:14px">用不到的項目按 ✕ 刪除，再用下方「＋ 新增類別」加自己的名稱；只有 01 號（${esc(N.firstItem)}）不能刪。刪除不影響已經記過的發票和憑證。</p>
    ${cats().map(g => `<div><div class="meta" style="margin:0 0 4px">${pill(g.src)}</div><div class="chips">${g.items.length ? '' : '<span class="hint" style="font-size:14px">已經沒有項目，要用時再從下方新增。</span>'}${g.items.map(x => `<span class="chip">${esc(x)}${!canDelCat(g.src, x) ? '' : `<button type="button" class="chipx" data-delsrc="${esc(g.src)}" data-delcat="${esc(x)}" aria-label="刪除 ${esc(x)}">✕</button>`}</span>`).join('')}</div></div>`).join('')}
@@ -921,13 +954,13 @@ function set() {
 }
 // 使用說明：每個主題一張真實畫面＋步驟；各頁右上「？這頁怎麼用」直接跳到對應主題
 const HELP = [
-  { id: 'start', t: '第一次使用', shot: 'set', steps: ['到「更多 → 設定」，打開「公托資料」，填主任姓名和計畫主持人（01 號受款人），按「儲存公托資料」。', '打開「員工名單」，一行一位，順序就是薪資憑證的編號（第一位是 02）。', '打開「委辦費預算」，依契約書填人事費、業務費總額和各細項。', '到「月費」按「＋ 新增幼兒」，輸入座號、姓名和生日。'] },
+  { id: 'start', t: '第一次使用', shot: 'set', steps: ['到「更多 → 設定」，打開「公托資料」，填主任姓名和計畫主持人（01 號受款人），按「儲存公托資料」。', '打開「員工名單」，一行一位，順序就是薪資憑證的編號（第一位是 02）。', '到「報表」頁的「委辦費預算與挪用 → 設定預算」，依契約書填人事費、業務費總額和各細項。', '到「月費」按「＋ 新增幼兒」，輸入座號、姓名和生日。'] },
   { id: 'add', t: '輸入發票', shot: 'dlginv', steps: ['拿到發票就按「＋ 新增發票」。', '代墊人預設是主任；付給廠商的選「付給廠商」並填廠商名稱。', '年、月已帶好，選日期、類別，填品名、數量和單價。經費來源會依類別自動帶出。', '不習慣一個畫面填很多欄位，可以在「本月」或「設定」改成一步一步模式。'] },
   { id: 'merge', t: '合併成憑證', shot: 'merge', steps: ['到「發票」，還沒做憑證的發票會照「類別＋付款對象」分組，同一組就能合成一張憑證。要印色紙的（營運收入支應、提升托育品質）排上面，委辦費（一般紙）排下面。', '按組名右邊的「全選這組」，或自己勾選要合併的幾張。', '按下方「合併成憑證」，編號、受款人、經費來源、用途說明、金額都會自動帶入。', '需要時可以改用途說明，或加一行備註（會印在簽章欄下方）。', '建立憑證需要網路，避免兩台裝置用到同一個編號。'] },
   { id: 'print', t: '列印憑證', shot: 'print', steps: ['到「更多 → 憑證與列印」，按「列印憑證」。', '還沒印的會先勾好；要補印的，在「要印哪幾張」清單自己勾起來。', '先印第 1 批委辦費（一般紙），再印第 2 批其他經費來源（色紙），畫面會說要放幾張色紙。', '可以左右滑動或按「上一張／下一張」看每一張。電腦和平板的預覽上方有「－ ＋」可以放大縮小，按「符合視窗」回到原本大小（手機不顯示，避免誤觸）。', '這個月有在系統之外先做過憑證（手寫、Excel）：按「設定起始編號」填已經用到第幾號，系統從下一號接著編。頁面右上角的「下一張憑證」隨時顯示下一張的編號。', '印出後才發現發票金額錯了：按那張憑證的「修改」，選要改的發票，改好後憑證金額、結報清單和年度報表會一起更新，編號不變。紙本手改就好，不一定要重印。'] },
   { id: 'cash', t: '零用金結算', shot: 'cash', steps: ['每月兩次，到「更多 → 零用金結算」。', '清單列主任代墊的發票，還有生日禮金、考核獎金（主任代墊），照憑證編號排列，會計可以拿著憑證依序對帳。', '預設全部勾選；這次只要結算其中幾張，把其他的勾勾拿掉，沒勾的會留到下一次。', '按「結算到今天」。還有發票沒做憑證、憑證沒印的，會先提醒你。', '結算過的清單在下方「已結算」，可以再列印；結算後才發現問題，按「退回」，發票回到本期改好再重新結算。'] },
-  { id: 'staff', t: '人事費', shot: 'staff', steps: ['薪資清冊做好後，到「更多 → 人事費」。', '每位員工填這個月的金額，經費來源預設委辦費-人事費。', '委辦人事費不夠時，按那位員工的「拆單」，填委辦費付多少，其餘自動改由營運收入支應。', '按「儲存本月人事費」。員工的生日月份在「設定 → 員工名單」填好，生日那個月儲存人事費時會自動建立生日禮金（預設 500 元），首頁也會提醒。', '生日禮金、考核獎金和外聘督導費的憑證，按「列印」會先填領款收據（日期、姓名、服務單位等；地址和身分證字號可以留空給領款人手寫，填了也不會存起來），印成上面粘存單、下面領款收據。', '考核獎金：打開「考核獎金（一次填所有員工）」，選期別，每位員工選等第（優等 5,000、甲等 3,000 會自動帶入，可改），按「建立考核獎金憑證」。', '12 月會多一區「年度年終獎金」，每位員工直接填金額，按「建立年終獎金憑證」一次做好。代班薪資和其他月份的生日禮金、年終獎金在下方「其他人事支出」新增。'] },
-  { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。餐點費看孩子到當月 1 號滿幾個月：未滿 6 個月不收、未滿 1 歲 300 元、滿 1 歲 600 元。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。備註會列在月費表下方，也會印在那位孩子的收據摘要裡。月費、餐點費預設系統算，要改金額就在「修改」裡的「月費」「餐點費」欄填數字，清空就回到系統算的。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變；每年 1 月從 001 號重新開始。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。', '收據日期在頁面最上面，預設每月 15 號（遇週末順延），每個月可以自己改；預設幾號在「設定 → 收據」改，優化比、契約價金也可以設不同的預設日。', '只想先印幾張：按「勾選收據」，勾選要印的（可以全選、全部不選），按「列印勾選的」；沒勾的之後再印。', '有幾張要用不同的日期：一樣按「勾選收據」，勾選後在下方選日期，按「套用日期」。', '頁面下方「請款收據」：1、4、7、10 月會出現優化比（繳款人預設屏東縣政府；1 月是前一年第四期），1、2、7、10 月會出現契約價金（繳款人預設協會）。按「填寫」確認金額、貼上摘要，再按「列印」。其他要開的收據按「＋ 其他收據」。'] },
+  { id: 'staff', t: '人事費', shot: 'staff', steps: ['薪資清冊做好後，到「更多 → 人事費」。', '每位員工填這個月的「薪資總額」，經費來源預設委辦費-人事費。', '委辦人事費不夠時，按那位員工的「拆單」：下面會多兩行，① 填委辦費-人事費付多少，② 營運收入支應-人事費自動算（總額減委辦）。按「儲存本月人事費」時，營運那份會另外建一張「薪資(2)」憑證。', '按「儲存本月人事費」。員工的生日月份在「設定 → 員工名單」填好，生日那個月儲存人事費時會自動建立生日禮金（預設 500 元），首頁也會提醒。', '生日禮金、考核獎金和外聘督導費的憑證要附領款收據：建立後人事費頁最上面會列出「還沒填寫列印」的，按綠色的「列印＋領據」先填領款收據（日期、姓名、服務單位等；地址和身分證字號可以留空給領款人手寫，填了也不會存起來），印成上面粘存單、下面領款收據。', '考核獎金：打開「考核獎金（一次填所有員工）」，選期別，每位員工選等第（優等 5,000、甲等 3,000 會自動帶入，可改），按「建立考核獎金憑證」。', '12 月會多一區「年度年終獎金」，每位員工直接填金額，按「建立年終獎金憑證」一次做好。代班薪資和其他月份的生日禮金、年終獎金在下方「其他人事支出」新增。'] },
+  { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。餐點費看孩子到當月 1 號滿幾個月：未滿 6 個月不收、未滿 1 歲 300 元、滿 1 歲 600 元。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。備註會列在月費表下方，也會印在那位孩子的收據摘要裡。月費、餐點費預設系統算，要改金額就在「修改」裡的「月費」「餐點費」欄填數字，清空就回到系統算的。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變；每年 1 月從 001 號重新開始。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。', '收據日期在頁面最上面，預設每月 15 號（遇週末順延），每個月可以自己改；預設幾號在「設定 → 收據」改，優化比、契約價金也可以設不同的預設日。', '每位孩子那一列都寫收據號碼和日期；只印一張就按那一列的「印這張」。', '要一次印好幾張，或改好幾張的日期：按「勾選多張（改日期／一起印）」，勾選後在畫面最下方按「列印勾選的」，或選日期按「套用日期」（只改勾選的，沒勾的維持原日期）。', '頁面下方「請款收據」：1、4、7、10 月會出現優化比（繳款人預設屏東縣政府；1 月是前一年第四期），1、2、7、10 月會出現契約價金（繳款人預設協會）。按「填寫」確認金額、貼上摘要，再按「列印」。其他要開的收據按「＋ 其他收據」。'] },
   { id: 'report', t: '報表', shot: 'report', steps: ['「年度經費報表」照每月報表的格式，自動算每月收入、支出、損益，和委辦費、行管費用了幾 %。', '優化比、提升托育品質、縣府補助款到帳時，按「＋ 新增撥款收入」；補助款要選期別（第一期、第二期⋯），每一期各一列。', '按「列印（A4 橫式）」印一頁；按「匯出 Excel」下載和原本格式一樣的 Excel（標楷體、顏色、公式）。', '委辦業務費有項目快用完或超支時，報表頁會列出「不夠用的項目」，按「補足」選要從哪一項轉出、金額，業務費總額不變；挪用紀錄可以還原。', '系統啟用前的月份，按「從 Excel 補登」選原本的經費明細檔，核對數字後按「補登」。補登之後才在系統新增的憑證、撥款收入會自動加上去；Excel 那個月沒有月費的，用系統算的月費。要交縣府時按「產出核銷報表」。'] },
   { id: 'trash', t: '刪錯了怎麼辦', shot: 'trash', steps: ['刪除的發票、取消的憑證會在「更多 → 垃圾桶」放 30 天。', '按「救回」就回到原本的地方，任何一台裝置都能救。', '剛刪掉時，畫面下方的提示也有「復原」可以按。', '憑證做錯想沿用同一個編號：先取消憑證，再到垃圾桶按「永久刪除」，下一張新做的憑證就會用這個編號。'] },
   { id: 'backup', t: '備份與還原', shot: 'backup', steps: ['建議每個月到「更多 → 設定 → 備份」按「下載備份」，存到電腦。', '萬一資料被改錯，按「從備份還原」，選那個備份檔。', '還原前會先自動下載一份目前的資料，還原錯了還能再還原回來。', '備份之後才新增的資料不會被刪掉。', '管理者每月 25 號起會看到提醒，到「設定 → 備份」按「一次下載四間」，會下載四間的每月報表（Excel）和備份（還原用）兩個檔案。還原時選這個四間的備份檔也可以，會自動取出目前這間。'] },
@@ -1190,7 +1223,7 @@ function govSheet(f, t) {
   let pers = 0, biz = 0, op = 0, total = 0, wbP = 0;
   for (let m = f; m <= t; m++) {
     const d = monthDoc(CY, m);
-    for (const r of d.payroll || []) { pers += +r.amount || 0; if (r.src === '委辦費-人事費') wbP += +r.amount || 0; else op += +r.amount || 0; }
+    for (const r of d.payroll || []) { pers += payAmt(r); if (paySrc(r) === '委辦費-人事費') wbP += payAmt(r); else op += payAmt(r); }
     if (d.payroll) biz += +(d.supervisor ?? N.supervisor) || 0;
     for (const v of vouchersOf(CY, m)) { if (v.kind === 'hr') { pers += v.amount; if (v.src.startsWith('營運')) op += v.amount; } else { if (v.src === '委辦費-業務費') biz += v.amount; else if (v.src.startsWith('營運')) op += v.amount; } }
     total += monthExpense(CY, m);
@@ -1200,7 +1233,7 @@ function govSheet(f, t) {
   return `<h3>${esc(N.full)}</h3><h4>${CY}年 ${f}–${t} 月經費支出摘要</h4>
   <table><tbody>${row('期間總支出', fmt(total) + ' 元')}${row('人事費支出', fmt(pers) + ' 元')}${row('委辦業務費支出（含${esc(N.firstItem)}）', fmt(biz) + ' 元')}${row('營運收入支應支出', fmt(op) + ' 元')}
   ${row('委辦人事費：已用／預算', `${fmt(pU)} ／ ${fmt(pB)} 元（${pct(pU, pB)}%），剩 ${fmt(pB - pU)} 元`)}${row('委辦業務費：已用／預算', `${fmt(bU)} ／ ${fmt(bB)} 元（${pct(bU, bB)}%），剩 ${fmt(bB - bU)} 元`)}</tbody></table>
-  <p style="font-size:13px;margin-top:12px">已用金額計至列印當天；系統啟用前的支出依「設定 → 委辦費預算」填寫的已用金額計算。明細可匯出業務費明細 Excel 附上。</p>`;
+  <p style="font-size:13px;margin-top:12px">已用金額計至列印當天；系統啟用前的支出依「報表 → 設定預算」填寫的已用金額計算。明細可匯出業務費明細 Excel 附上。</p>`;
 }
 
 /* ===== 預覽（一頁一張、可滑動） ===== */
@@ -1568,7 +1601,7 @@ const bdayMissing = (y, m) => bdayStaff(m).filter(n => !hasBday(y, m, n));
 const bdayData = (y, m, name, a = bdayAmt()) => ({ payee: name, src: '營運收入支應-人事費', desc: `${m}月${name}生日禮金`, amount: a, hrType: 'bday' });   // 印成「萬丹公托-12月○○○生日禮金」
 function makeBdays(y, m, lead) {
   const miss = bdayMissing(y, m); if (!miss.length) return Promise.resolve([]);
-  return createHrBatch(miss.map(n => bdayData(y, m, n))).then(vs => { toast(`${lead || ''}已建立 ${vs.length} 張生日禮金：${vs.map(v => `${v.no}（${v.payee}）`).join('、')}。`); return vs }).catch(fail('生日禮金沒有建立成功，請確認網路後再試一次。'));
+  return createHrBatch(miss.map(n => bdayData(y, m, n))).then(vs => { toast(`${lead || ''}已建立 ${vs.length} 張生日禮金：${vs.map(v => `${v.no}（${v.payee}）`).join('、')}。接著按上方的「列印＋領據」填寫領據。`); return vs }).catch(fail('生日禮金沒有建立成功，請確認網路後再試一次。'));
 }
 /* 年終獎金：12 月在人事費頁一次填所有員工 */
 const bonusOf = (y, name) => S().vouchers.find(v => !v.deleted && v.kind === 'hr' && v.y === y && v.payee === name && (v.hrType === 'bonus' || /年終獎金/.test(v.desc || '')));
@@ -1820,6 +1853,7 @@ document.addEventListener('click', e => {
   if (t.dataset.batch) { VP.batch = +t.dataset.batch; return showVP() }
   if (t.dataset.jump !== undefined) return pvGo(+t.dataset.jump);
   if (t.dataset.kid) return openKid(t.dataset.kid);
+  if (t.dataset.rcpt1) { const { y, m } = SEL_M.fee, k = monthKids(y, m).find(x => x.id === t.dataset.rcpt1); if (k) return printReceipts(y, m, [k]) }
   if (t.id === 'fpStart') { FP = FP ? null : new Set(); FPD = ''; return render() }
   if (t.dataset.fpick) { if (!FP) return; const id = t.dataset.fpick; FP.has(id) ? FP.delete(id) : FP.add(id); return fpSync() }
   if (t.id === 'fpAll') { const { y, m } = SEL_M.fee, ks = monthKids(y, m), all = ks.every(k => FP.has('k:' + k.id)); ks.forEach(k => all ? FP.delete('k:' + k.id) : FP.add('k:' + k.id)); return fpSync() }
@@ -1855,6 +1889,7 @@ document.addEventListener('click', e => {
   }
   if (t.dataset.cashsel) { const id = t.dataset.cashsel; cashOff.has(id) ? cashOff.delete(id) : cashOff.add(id); return render() }
   if (t.dataset.unsettle) return unsettle(t.dataset.unsettle);
+  if (t.dataset.gobud) { BUD_OPEN = true; const done = () => { const b = $('#budBox'); if (b) { b.open = true; b.scrollIntoView({ block: 'start', behavior: 'smooth' }) } }; if (view === 'report') return done(); go('report'); return setTimeout(done, 60) }
   if (t.dataset.move != null) return moveDialog(t.dataset.move);
   if (t.dataset.unmove) { const r = (N.wbMoves || []).find(x => x.id === t.dataset.unmove); if (!r) return; return ask('還原挪用', `<p class="hint">把${esc(r.to)}的 ${fmt(r.amount)} 元還給${esc(r.from)}？${wbLeft(r.to) < r.amount ? `還原後${esc(r.to)}會超支 ${fmt(r.amount - wbLeft(r.to))} 元。` : ''}</p>`, () => undoMove(r.id), '還原') }
   if (t.dataset.restorei) { store.update('invoices', t.dataset.restorei, { deleted: false, deletedAt: null }).catch(fail()); toast('已救回這張發票。'); return }
@@ -1878,18 +1913,16 @@ document.addEventListener('click', e => {
     return toast('已刪除備註。', () => { store.set('months', ymKey(y, m), { y, m, noteMap: { [key]: n } }).catch(fail()); toast('已復原') });
   }
   if (t.dataset.delincome) { const id = t.dataset.delincome; return ask('刪除撥款收入', '<p class="hint">確定要刪除這筆撥款收入嗎？</p>', () => { store.remove('incomes', id).catch(fail()); toast('已刪除。') }, '刪除', 'btn danger') }
-  if (t.dataset.split) {
-    const { y, m } = SEL_M.staff, rows = payrollRows(y, m), r = rows[+t.dataset.split];
-    const remain = Math.max(0, (+N.wbPersonBudget || 0) - wbPersonUsed());
-    return ask(`拆單：${r.name}`, `<p class="hint">本月薪資 ${fmt(r.amount)} 元。委辦費付的部分留在原本的編號，另一部分會建立一張新的憑證（營運收入支應-人事費），編號接在這個月最新一號之後。</p>
-     <label>委辦費-人事費支付<input type="number" inputmode="numeric" id="spA" data-sp="${+r.amount || 0}" value="${Math.min(+r.amount || 0, remain)}"></label>
-     <div class="totalline"><span>營運收入支應-人事費支付</span><b id="spB">${fmt((+r.amount || 0) - Math.min(+r.amount || 0, remain))}</b></div>`, () => {
-      const a = +$('#spA').value || 0, b = (+r.amount || 0) - a;
-      if (a < 0 || b <= 0) { toast('拆出來的金額要大於 0。'); return false }
-      const nr = rows.map((x, i) => i === +t.dataset.split ? { ...x, amount: a, src: '委辦費-人事費' } : x);
-      store.set('months', ymKey(y, m), { y, m, payroll: nr, supervisor: +$('#supAmt')?.value || N.supervisor }).catch(fail());
-      createHrVoucher({ payee: r.name, src: '營運收入支應-人事費', desc: `${y}年${m}月薪資(2)`, amount: b }).then(v => toast(`已拆單，另一筆是 ${v.no}。`)).catch(fail('拆單沒有完成，請確認網路後再試一次。'));
-    }, '確定拆單');
+  if (t.dataset.split) {          // 拆單：在這一列下面多兩行（① 委辦付多少、② 營運自動算），按「儲存本月人事費」才存
+    const i = t.dataset.split, box = document.querySelector(`[data-splitbox="${i}"]`), on = box.hidden;
+    box.hidden = !on; document.querySelector(`[data-psrc="${i}"]`).hidden = on; document.querySelector(`[data-splitlab="${i}"]`).hidden = !on;
+    t.textContent = on ? '取消拆單' : '拆單'; t.setAttribute('aria-pressed', String(on)); dirty = true;
+    const wb = document.querySelector(`[data-pwb="${i}"]`);
+    if (on && wb.value === '') { const tot = +document.querySelector(`[data-pamt="${i}"]`).value || 0, others = [...document.querySelectorAll('[data-pamt]')].reduce((a, el) => { const k = el.dataset.pamt; if (k === i) return a; const sp = !document.querySelector(`[data-splitbox="${k}"]`).hidden; return a + (sp ? +document.querySelector(`[data-pwb="${k}"]`).value || 0 : document.querySelector(`[data-psrc="${k}"]`).value === '委辦費-人事費' ? +el.value || 0 : 0) }, 0);
+      const { y, m } = SEL_M.staff, before = wbPersonUsed() - payrollRows(y, m).filter(r => paySrc(r) === '委辦費-人事費').reduce((a, r) => a + payAmt(r), 0);
+      wb.value = Math.max(0, Math.min(tot, (+N.wbPersonBudget || 0) - before - others)); }
+    paySync(i); if (on) wb.focus();
+    return;
   }
   if (t.dataset.hr) {
     const kind = t.dataset.hr, { y, m } = SEL_M.staff;
@@ -1954,10 +1987,26 @@ document.addEventListener('click', e => {
       store.setSettings({ receiptSkipY: { [y]: skip } }).catch(fail()); toast(`已標記 ${y} 年 ${rcptNo(f)}–${rcptNo(f + c - 1)} 號為協會借用。`)
     }, '標記借用'); }
     case 'savePay': {
-      const { y, m } = SEL_M.staff, rows = payrollRows(y, m).map((r, i) => ({ name: r.name, src: document.querySelector(`[data-psrc="${i}"]`).value, amount: +document.querySelector(`[data-pamt="${i}"]`).value || 0 }));
+      const { y, m } = SEL_M.staff, q = (k, i) => document.querySelector(`[data-${k}="${i}"]`);
+      const rows = payrollRows(y, m).map((r, i) => {
+        const total = +q('pamt', i).value || 0, split = !q('splitbox', i).hidden;
+        return split ? { name: r.name, src: '委辦費-人事費', amount: total, split: true, wb: +q('pwb', i).value || 0 } : { name: r.name, src: q('psrc', i).value, amount: total };
+      });
+      const bad = rows.find(r => r.split && (r.wb <= 0 || r.wb >= r.amount));
+      if (bad) return toast(`${bad.name} 拆單的金額不對：① 委辦費付的要大於 0、小於薪資總額。不拆單請按「取消拆單」。`);
       store.set('months', ymKey(y, m), { y, m, payroll: rows, supervisor: +$('#supAmt').value || 0 }).catch(fail());
-      if (bdayMissing(y, m).length) return makeBdays(y, m, `已儲存 ${m} 月人事費，也`);
-      return toast(`已儲存 ${m} 月人事費。`);
+      // 拆單的營運那份：沒有就建一張「薪資(2)」，金額變了就改，取消拆單就把那張取消
+      const make = [], ops = [];
+      for (const r of rows) {
+        const v2 = split2Of(y, m, r.name);
+        if (r.split) { const op = r.amount - r.wb; if (!v2) make.push({ payee: r.name, src: '營運收入支應-人事費', desc: `${y}年${m}月薪資(2)`, amount: op, hrType: 'split' }); else if (+v2.amount !== op) ops.push({ c: 'vouchers', id: v2.no, update: { amount: op } }); }
+        else if (v2 && !v2.settled) ops.push({ c: 'vouchers', id: v2.no, update: { deleted: true, deletedAt: Date.now() } });
+      }
+      if (ops.length) store.batch(ops).catch(fail());
+      const after = () => bdayMissing(y, m).length ? makeBdays(y, m, `已儲存 ${m} 月人事費，也`) : null;
+      if (make.length) return createHrBatch(make).then(vs => { toast(`已儲存 ${m} 月人事費。拆單的營運那份另外建了 ${vs.map(v => `${v.no}（${v.payee}）`).join('、')}。`); after() }).catch(fail('拆單的憑證沒有建立成功，請確認網路後再按一次儲存。'));
+      if (after()) return;
+      return toast(`已儲存 ${m} 月人事費。${ops.length ? '拆單的營運那份已一起更新。' : ''}`);
     }
     case 'meritMake': {
       const { y } = SEL_M.staff, per = $('#meritPer').value;
@@ -1968,7 +2017,7 @@ document.addEventListener('click', e => {
         createHrBatch(list.map(r => meritData(per, r.n, r.g || '', +r.a))).then(vs => {
           vs.forEach(v => delete meritDraft[v.payee]); meritPer = per;
           if (!dirty) render(); else toast('已建立，存好人事費後畫面會更新。');
-          toast(`已建立 ${vs.length} 張考核獎金：${vs[0].no}～${vs[vs.length - 1].no}。按各張的「列印」印領款收據。`);
+          toast(`已建立 ${vs.length} 張考核獎金：${vs[0].no}～${vs[vs.length - 1].no}。接著按上方的「列印＋領據」填寫領據。`);
         }).catch(fail('沒有全部建立成功，請確認網路後再試一次；已建立的會顯示編號。'));
       }, '建立');
     }
@@ -2068,15 +2117,20 @@ addEventListener('online', renderNet); addEventListener('offline', renderNet);
 // 設定、人事頁有還沒儲存的修改時，別台裝置的資料更新不要把畫面重畫掉
 let dirty = false;
 // 年終獎金的金額另外記（bonusDraft），畫面重畫也不會不見，所以不算「還沒儲存」
-document.addEventListener('input', e => { const ds = e.target.dataset || {};
+function paySync(i) {
+  const tot = +(document.querySelector(`[data-pamt="${i}"]`) || {}).value || 0, wbEl = document.querySelector(`[data-pwb="${i}"]`), out = document.querySelector(`[data-pop="${i}"]`);
+  if (!wbEl || !out) return; const wb = +wbEl.value || 0, op = tot - wb;
+  out.textContent = wbEl.value === '' ? '—' : op < 0 ? `委辦比總額多 ${fmt(-op)}，請改小` : fmt(op); out.classList.toggle('when-bad', op < 0);
+}
+document.addEventListener('input', e => { const ds = e.target.dataset || {}; if (ds.pamt != null || ds.pwb != null) paySync(ds.pamt ?? ds.pwb);
   if (ds.mamt != null || ds.mgrade != null) { const n = (N.staff || [])[+(ds.mamt ?? ds.mgrade)], r = meritDraft[n] = meritDraft[n] || {};
     if (ds.mgrade != null) { r.g = e.target.value; if (e.target.value in MERIT) { r.a = MERIT[e.target.value]; const inp = document.querySelector(`[data-mamt="${ds.mgrade}"]`); if (inp) inp.value = r.a } } else r.a = e.target.value; return }
-  if (e.target.dataset.bonus != null) { bonusDraft[(N.staff || [])[+e.target.dataset.bonus]] = e.target.value; return } if (e.target.closest('#view') && (view === 'set' || view === 'staff')) dirty = true }, true);
+  if (e.target.dataset.bonus != null) { bonusDraft[(N.staff || [])[+e.target.dataset.bonus]] = e.target.value; return } if (e.target.closest('#view') && (view === 'set' || view === 'staff' || (view === 'report' && e.target.closest('#budBox')))) dirty = true }, true);
 document.addEventListener('change', e => { const ds = e.target.dataset || {}; if (ds.bonus != null || ds.mamt != null || ds.mgrade != null) return;
-  if (e.target.id === 'meritPer') { meritPer = e.target.value; return render() } if (e.target.closest('#view') && (view === 'set' || view === 'staff')) dirty = true }, true);
+  if (e.target.id === 'meritPer') { meritPer = e.target.value; return render() } if (e.target.closest('#view') && (view === 'set' || view === 'staff' || (view === 'report' && e.target.closest('#budBox')))) dirty = true }, true);
 document.addEventListener('click', e => { const b = e.target.closest('button'); if (b && /^save|^addCat$|^logout$/.test(b.id || '')) dirty = false; if (b && b.dataset.mode) dirty = false }, true);
 const _render = render;
-render = function () { if (dirty && (view === 'set' || view === 'staff')) return; _render(); };
+render = function () { if (dirty && guardView()) return; _render(); };
 
 window.__app = { go, get store() { return store }, upgrade: upgradeSettings, fillInv: fillInvForm, openWiz, annual, nextNo, purgeTrash };   // 自動測試用
 boot();

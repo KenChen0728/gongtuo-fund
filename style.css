@@ -7,6 +7,7 @@
   --bad:#6E3F28; --bad-soft:#EBE3D2;
   --warn:#7D5F2E; --warn-soft:#F1E7D0;
   --gov:#4A6880; --gov-soft:#E0E7EC;
+  --btn-line:#8A7A50;
   --font:-apple-system,BlinkMacSystemFont,"PingFang TC","Microsoft JhengHei","Noto Sans TC",sans-serif;
   color-scheme:light;
 }
@@ -19,6 +20,7 @@
   --bad:#E3C39A; --bad-soft:#443C33;
   --warn:#D9BC82; --warn-soft:#463B28;
   --gov:#A9C0D1; --gov-soft:#343F49;
+  --btn-line:#8C846F;
   color-scheme:dark;
 }}
 :root{--kai:"標楷體","DFKai-SB","BiauKaiTC","BiauKai","Kaiti TC","TW-Kai","LXGW WenKai TC",serif;--nav-pad:max(6px,env(safe-area-inset-bottom,0px));--nav-h:calc(63px + var(--nav-pad));--side:232px}
@@ -121,7 +123,9 @@ section{display:flex;flex-direction:column;gap:8px}
 .num{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
 .amount{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
 
-.btn{border:1px solid var(--line);background:none;border-radius:7px;padding:8px 14px;min-height:44px}
+/* 按鈕：實心底＋深一點的框（框和背景對比 3:1 以上），一眼看得出可以按；主要動作用實心綠 */
+.btn{border:1.5px solid var(--btn-line);background:var(--surface);color:var(--ink);font-weight:600;border-radius:7px;padding:8px 14px;min-height:44px}
+.btn[aria-pressed=true]{background:var(--ink);border-color:var(--ink);color:var(--surface)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:700}
 .btn.danger{color:var(--bad);border-color:var(--bad);margin-right:auto}
 .btn:disabled,.btn[aria-disabled=true]{background:var(--line);border:1px dashed var(--muted);color:var(--muted);cursor:default}
@@ -134,7 +138,9 @@ section{display:flex;flex-direction:column;gap:8px}
 .chip{background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:8px 18px;min-height:44px}
 .chip[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:700}
 .add{position:fixed;z-index:4;right:max(16px,env(safe-area-inset-right,0px));bottom:calc(var(--nav-h) + 12px);background:var(--accent);color:var(--accent-ink);border:0;border-radius:999px;padding:12px 20px;font-weight:700;box-shadow:0 2px 8px rgb(0 0 0/.25);min-height:48px}
-.edit{flex:none;background:none;border:1px solid var(--line);border-radius:7px;padding:4px 10px;min-height:44px;min-width:56px;font-size:15px;color:var(--muted)}
+.edit{flex:none;background:var(--surface);border:1.5px solid var(--btn-line);border-radius:7px;padding:4px 10px;min-height:44px;min-width:56px;font-size:15px;font-weight:600;color:var(--ink)}
+.edit.now{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.p-rcv{background:var(--gov-soft);color:var(--gov)}
 .back{align-self:flex-start;background:none;border:0;padding:8px 0;min-height:44px;color:var(--accent);font-weight:700}
 .tick{display:flex;flex-direction:column;align-items:center;gap:1px;background:none;border:0;padding:0;font-size:13px;color:var(--muted);min-width:44px;flex:none}
 .tick i{width:32px;height:32px;border:2px solid var(--accent);border-radius:7px;display:grid;place-items:center;font:700 20px/1 var(--font);color:transparent;font-style:normal}
@@ -373,7 +379,7 @@ input[type=date]{font:16px var(--font);padding:8px;border:1px solid var(--line);
 
 /* 右上角「下一張憑證」 */
 .ptitle{flex-wrap:wrap}
-.nextno{flex:none;margin-left:auto;min-height:44px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:inherit;font-size:14px;cursor:pointer}
+.nextno{flex:none;margin-left:auto;min-height:44px;padding:0 12px;border:1.5px solid var(--btn-line);border-radius:999px;background:var(--surface);color:var(--muted);font:inherit;font-size:14px;cursor:pointer}
 .nextno b{color:var(--ink);font-size:15px;margin-left:2px}
 .nextno:not([hidden])+.qhelp{margin-left:0}
 @media (max-width:400px){.nx-long{display:none}.nextno{padding:0 10px}.qhelp{font-size:14px}}
@@ -387,3 +393,16 @@ input[type=date]{font:16px var(--font);padding:8px;border:1px solid var(--line);
 .pzoom #pvZFit[aria-pressed=true]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
 .a4view.zoomed{touch-action:auto;user-select:auto;-webkit-user-select:auto}
 .a4view.zoomed .a4slot{overflow:auto;max-height:calc(100vh - 340px);justify-content:safe center}
+/* 人事費拆單：在那一列下面多兩行 */
+.payrow{flex-wrap:wrap}
+.splitbox{flex-basis:100%;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:flex-end;justify-content:flex-end;padding:8px 10px;margin-top:4px;border-radius:8px;background:var(--accent-soft)}
+.splitbox .payamt b{font-size:17px;min-height:44px;display:flex;align-items:center;justify-content:flex-end;min-width:120px;font-variant-numeric:tabular-nums}
+/* 月費頁勾選多張：下方兩列，上列數量和全選，下列改日期和列印 */
+.fpbar{flex-direction:column;align-items:stretch;gap:8px}
+.fpbar .fprow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.fpbar .fprow .title{flex:1 1 auto;font-weight:700}
+.fpbar .fplab{font-weight:700;font-size:15px}
+.fpbar #fpPrint{margin-left:auto}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.wbtable td:first-child,.wbtable th:first-child{min-width:7.5em}
+.bgrid td:first-child{min-width:7em}
