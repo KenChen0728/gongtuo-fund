@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="zh-Hant-TW"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>公托經費記帳</title>
+<meta name="description" content="四間公托共用的經費記帳：發票、憑證、零用金、月費收據與報表">
+
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="經費記帳">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#FAF1CF">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#26241F">
+<link rel="stylesheet" href="style.css">
+</head><body>
+
+<div class="boot" id="boot">
+  <img class="logo" src="icons/icon-192.png" alt="">
+  <h1>公托經費記帳</h1>
+  <p class="hint" id="bootMsg">載入中，如果一直停住，請確認網路後重新開啟。</p>
+</div>
+
+<div class="login" id="login" hidden>
+  <img class="logo" src="icons/icon-192.png" alt="">
+  <h1>公托經費記帳</h1>
+  <form class="card" id="fLogin">
+    <label>請輸入公托的序號
+      <input type="text" id="serial" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="例如 7K3P-92QX" maxlength="24">
+    </label>
+    <p class="err" id="loginErr" role="alert" hidden></p>
+    <button type="submit" class="btn primary" id="loginGo" style="min-height:52px;font-size:18px">登入</button>
+    <p class="hint" style="font-size:14px">序號由管理者提供，每間公托一組。輸入一次後，這台裝置會記住，之後打開就直接進入。</p>
+    <p class="hint" id="lineHint" style="font-size:14px" hidden>你現在是在 LINE 裡開啟，這裡的登入不會留下來。請按右下角的選單，選「用 Safari 開啟」或「用預設瀏覽器開啟」。</p>
+  </form>
+  <button type="button" class="btn" id="tryDemo">先用範例資料試試看（不會存檔）</button>
+  <p class="copyright">© 2026 公托經費記帳・僅供四間公托內部使用</p>
+</div>
+
+<div class="wrap" id="app" data-view="home" hidden>
+  <aside class="side">
+    <header class="brand"><h1 id="brandName">公托經費</h1><div class="date" id="today"></div></header>
+    <button class="add" id="add">＋ 新增發票</button>
+    <button class="shade" id="moreShade" aria-label="關閉更多選單" tabindex="-1" hidden></button>
+    <nav class="tabs" id="tabs" aria-label="頁面">
+      <button class="tab" data-view="home"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>本月</button>
+      <button class="tab" data-view="inv"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg>發票</button>
+      <button class="tab" data-view="fee"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5"/><path d="M16 5a3 3 0 0 1 0 6M18 15c2 .6 3 2.2 3 5"/></svg>月費</button>
+      <button class="tab" data-view="report"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 20h18M6 16v-5M11 16V6M16 16v-8"/></svg>報表</button>
+      <button class="tab moretab" id="moreBtn" aria-expanded="false" aria-controls="moreMenu"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>更多</button>
+      <div class="extra" id="moreMenu">
+        <div class="sep"></div>
+        <button class="tab" data-view="vou"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6"/></svg>憑證與列印</button>
+        <button class="tab" data-view="cash"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18M15 15h3"/></svg>零用金結算</button>
+        <button class="tab" data-view="staff"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>人事費</button>
+        <button class="tab" data-view="trash"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14"/></svg>垃圾桶</button>
+        <div class="sep"></div>
+        <button class="tab" data-view="set"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>設定</button>
+        <button class="tab" data-view="help"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.7M12 17h.01"/></svg>說明</button>
+      </div>
+    </nav>
+  </aside>
+  <div class="content">
+    <div class="netbar" id="netBar" role="status" hidden></div>
+    <div class="status info" id="demoBar" role="note" hidden>預覽版：試用新功能，裡面都是虛構的資料，修改不會存下來，也不影響正式版。<button type="button" class="btn" id="leaveDemo" hidden>回到登入</button></div>
+    <div class="status" id="adminBar" role="region" aria-label="管理者" hidden></div>
+    <div class="alertbar" id="alertBar" role="region" aria-label="重要提醒" hidden></div>
+    <div class="pagehead"><div class="ptitle"><h2 class="pagename" id="pageName">本月</h2><button type="button" class="nextno" id="nextNo" aria-label="下一張憑證編號，點了到憑證與列印" hidden></button><button type="button" class="btn qhelp" id="helpQ">？ 這頁怎麼用</button></div><div id="headExtra"></div></div>
+    <main id="view"></main>
+  </div>
+</div>
+<div class="mergebar" id="mergebar" hidden></div>
+<div class="toast" id="toast" hidden role="status"></div>
+<button type="button" class="update" id="updateBtn" hidden>有新版本，按這裡更新</button>
+<div class="printarea" id="printArea"></div>
+<input type="file" id="restoreFile" accept=".json,application/json" hidden>
+<input type="file" id="importFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+<style id="pageSize"></style>
+
+<!-- 新增發票（一般模式） -->
+<dialog id="dlgInv">
+  <form id="fInv" method="dialog">
+    <h2 id="invTitle">新增發票</h2>
+    <p class="hint" id="iLock" hidden></p>
+    <label>代墊人／受款人
+      <select id="iPayer"><option value="主任">主任代墊</option><option value="廠商">付給廠商</option></select>
+    </label>
+    <label id="iVendorWrap" hidden>廠商名稱<input type="text" id="iVendor" placeholder="例如：清涼冷氣工程行" list="vendors"></label>
+    <datalist id="vendors"></datalist>
+    <div>
+      <div style="font-size:15px;font-weight:500;margin-bottom:4px">發票日期（年、月已帶入本月，請選日期）</div>
+      <div class="three">
+        <select id="iY" aria-label="年"></select>
+        <select id="iM" aria-label="月"></select>
+        <select id="iD" aria-label="日"></select>
+      </div>
+    </div>
+    <label>類別<select id="iCat"></select></label>
+    <div id="iOtherWrap" hidden class="two">
+      <label>新類別名稱<input type="text" id="iOtherName" placeholder="例如：教具"></label>
+      <label>經費來源<select id="iOtherSrc"></select></label>
+    </div>
+    <div class="srcline">經費來源：<span id="iSrc"></span></div>
+    <label>內容（品名）<input type="text" id="iDesc" placeholder="例如：光泉豆漿"></label>
+    <label id="iFoodWrap" hidden>這張發票買了哪些食材（會列在食材費統計）<input type="text" id="iFood" placeholder="例如：豬瘦絞肉、絲瓜、馬鈴薯"></label>
+    <div class="two">
+      <label>數量<input type="number" id="iQty" inputmode="numeric" min="1" value="1"></label>
+      <label>單價（元）<input type="number" id="iPrice" inputmode="numeric" min="0" placeholder="0"></label>
+    </div>
+    <div class="totalline"><span>總價</span><b id="iTotal">0</b></div>
+    <div class="actions">
+      <button type="button" class="btn danger" id="iDel" hidden>刪除</button>
+      <button type="button" class="btn" data-close>取消</button>
+      <button type="submit" class="btn primary">儲存</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 新增發票（一步一步模式） -->
+<dialog id="dlgWiz"><div class="wiz" id="wizBody"></div></dialog>
+
+<!-- 合併成憑證 -->
+<dialog id="dlgMerge">
+  <form id="fMerge" method="dialog">
+    <h2>建立憑證</h2>
+    <p class="hint">以下都已自動帶入，需要時可以修改用途說明。</p>
+    <div class="card" style="gap:6px">
+      <div class="meta" style="margin:0">憑證編號</div><div class="amount" id="mNo"></div>
+      <div class="meta" style="margin:0">受款人</div><div id="mPayee"></div>
+      <div class="meta" style="margin:0">經費來源</div><div id="mSrc"></div>
+    </div>
+    <div class="status warn mguard" id="mGuard" hidden></div>
+    <label>用途說明<textarea id="mDesc"></textarea></label>
+    <label>備註（選填，會印在簽章欄下方）<textarea id="mNote" placeholder="例如：115年11月20日園務會議，誤餐費一人120元，故此次核銷XXX元"></textarea></label>
+    <div class="totalline"><span>金額（<span id="mCount"></span> 張發票）</span><b id="mAmt"></b></div>
+    <div class="actions">
+      <button type="button" class="btn" data-close>取消</button>
+      <button type="submit" class="btn primary" id="mGo">建立憑證</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 孩子：基本資料與本月費用 -->
+<dialog id="dlgKid">
+  <form id="fKid" method="dialog">
+    <h2 id="kTitle"></h2>
+    <p class="hint" id="kInfo" style="font-size:15px"></p>
+    <details class="pickbox" id="kBasic">
+      <summary>基本資料（座號、姓名、生日）</summary>
+      <div class="three">
+        <label>座號<input type="number" id="kSeat" inputmode="numeric" min="1"></label>
+        <label style="grid-column:span 2">姓名<input type="text" id="kName"></label>
+      </div>
+      <label>生日<input type="date" id="kBirth" max="9999-12-31"></label>
+    </details>
+    <div id="kFeeBox" style="display:flex;flex-direction:column;gap:12px">
+      <div class="two">
+        <label>月費<input type="number" id="kFeeOv" inputmode="numeric"></label>
+        <label>餐點費<input type="number" id="kMealOv" inputmode="numeric"></label>
+      </div>
+      <p class="hint" style="font-size:14px;margin:-4px 0 0">空白＝系統自動算（灰字是系統算的金額）；要改才填數字，清空就回到系統算的。<span id="kOvNote" class="when-warn" hidden>這個月已手改金額。</span></p>
+      <div class="two">
+        <label>上課天數<input type="number" id="kDays" inputmode="numeric" placeholder="全月不用填"></label>
+        <label>保險費<input type="number" id="kIns" inputmode="numeric" placeholder="0"></label>
+      </div>
+      <div class="two">
+        <label>延托費<input type="number" id="kLate" inputmode="numeric" placeholder="0"></label>
+        <label>延托日期（選填）<input type="text" id="kLateNote" placeholder="例如 10/7"></label>
+      </div>
+      <div class="two">
+        <label>退費（填負數）<input type="number" id="kRefund" inputmode="numeric" placeholder="例如 -800"></label>
+        <label>退費原因（選填）<input type="text" id="kRefundNote" placeholder="例如 病假五日"></label>
+      </div>
+      <p class="hint" style="font-size:14px;margin:-4px 0 0">延托日期、退費原因會印在家長簽收單的金額後面。</p>
+      <label>新增備註（選填，會列在月費表下方，也印在這位孩子的收據上）<textarea id="kNote" class="small" placeholder="例如：11/3–11/6 腸病毒休養共 4 日，退費 800 元。"></textarea></label>
+      <div class="totalline"><span id="kCalc"></span><b id="kTotal"></b></div>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn danger" id="kLeave">畢業／離開</button>
+      <button type="button" class="btn" id="kRcpt">預覽收據</button>
+      <button type="button" class="btn" data-close>取消</button>
+      <button type="submit" class="btn primary">儲存</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 列印預覽：一頁一張 -->
+<dialog id="dlgPrint" class="wide">
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <div class="wiztop"><h2 id="pTitle">列印預覽</h2><button type="button" class="btn" data-close style="margin-left:auto">關閉</button></div>
+    <div id="pTools"></div>
+    <div class="pvgrid" id="pGrid">
+      <div style="display:flex;flex-direction:column;gap:8px;min-width:0">
+        <div class="pzoom" id="pvZoom" role="group" aria-label="預覽大小" hidden><button type="button" class="btn" id="pvZOut" aria-label="縮小">－</button><span class="pos" id="pvZLbl"></span><button type="button" class="btn" id="pvZIn" aria-label="放大">＋</button><button type="button" class="btn" id="pvZFit">符合視窗</button></div>
+        <div class="a4view" id="pvView"><div class="a4strip" id="pvStrip"></div></div>
+        <div class="pnav" id="pvNav">
+          <button type="button" class="btn" id="pvPrev">‹ 上一張</button>
+          <span class="pos" id="pvPos"></span>
+          <button type="button" class="btn" id="pvNext">下一張 ›</button>
+        </div>
+      </div>
+      <div id="pSide"></div>
+    </div>
+    <div class="actions"><button type="button" class="btn primary" id="pGo">列印</button></div>
+  </div>
+</dialog>
+
+<!-- 登入提醒 -->
+<dialog id="dlgAlert">
+  <form id="fAlert" method="dialog">
+    <h2>本月重要提醒</h2>
+    <ul class="alertlist" id="alertList"></ul>
+    <p class="hint" style="font-size:14px">按「已了解」後，下次登入不會再跳出；每月 20 號以後第一次登入會再提醒一次。這些提醒會一直顯示在頁面最上方，處理好才會消失。</p>
+    <label class="check"><input type="checkbox" id="alertOk"> 我已了解，會在核銷前處理</label>
+    <div class="actions"><button type="submit" class="btn primary" id="alertGo" aria-disabled="true">已了解</button></div>
+  </form>
+</dialog>
+
+<!-- 通用：確認／簡單表單 -->
+<dialog id="dlgAsk">
+  <form id="fAsk" method="dialog">
+    <h2 id="aTitle"></h2>
+    <div id="aBody" style="display:flex;flex-direction:column;gap:10px"></div>
+    <div class="actions">
+      <button type="button" class="btn" data-close>取消</button>
+      <button type="submit" class="btn primary" id="aOk">確定</button>
+    </div>
+  </form>
+</dialog>
+
+<script type="module" src="app.js"></script>
+</body></html>
