@@ -160,12 +160,17 @@
       <p class="hint" style="font-size:14px;margin:-4px 0 0">空白＝系統自動算（灰字是系統算的金額）；要改才填數字，清空就回到系統算的。<span id="kOvNote" class="when-warn" hidden>這個月已手改金額。</span></p>
       <div class="two">
         <label>上課天數<input type="number" id="kDays" inputmode="numeric" placeholder="全月不用填"></label>
-        <label>延托費<input type="number" id="kLate" inputmode="numeric" placeholder="0"></label>
+        <label>保險費<input type="number" id="kIns" inputmode="numeric" placeholder="0"></label>
       </div>
       <div class="two">
-        <label>保險費<input type="number" id="kIns" inputmode="numeric" placeholder="0"></label>
-        <label>退費（填負數）<input type="number" id="kRefund" inputmode="numeric" placeholder="例如 -800"></label>
+        <label>延托費<input type="number" id="kLate" inputmode="numeric" placeholder="0"></label>
+        <label>延托日期（選填）<input type="text" id="kLateNote" placeholder="例如 10/7"></label>
       </div>
+      <div class="two">
+        <label>退費（填負數）<input type="number" id="kRefund" inputmode="numeric" placeholder="例如 -800"></label>
+        <label>退費原因（選填）<input type="text" id="kRefundNote" placeholder="例如 病假五日"></label>
+      </div>
+      <p class="hint" style="font-size:14px;margin:-4px 0 0">延托日期、退費原因會印在家長簽收單的金額後面。</p>
       <label>新增備註（選填，會列在月費表下方，也印在這位孩子的收據上）<textarea id="kNote" class="small" placeholder="例如：11/3–11/6 腸病毒休養共 4 日，退費 800 元。"></textarea></label>
       <div class="totalline"><span id="kCalc"></span><b id="kTotal"></b></div>
     </div>

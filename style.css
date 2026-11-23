@@ -406,3 +406,13 @@ input[type=date]{font:16px var(--font);padding:8px;border:1px solid var(--line);
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 .wbtable td:first-child,.wbtable th:first-child{min-width:7.5em}
 .bgrid td:first-child{min-width:7em}
+
+/* 家長簽收單：一頁 2×5 格 */
+.a4:has(.signpage){padding:30px 34px}
+@media print{.printarea .a4:has(.signpage){padding:8mm 9mm}}
+.signpage{display:flex;flex-direction:column;height:100%;color:#000;font-family:var(--kai)}
+.signpage h3{text-align:center;font-size:20px;margin:0 0 8px;font-weight:700}
+.signtab{flex:1;width:100%;border-collapse:collapse;table-layout:fixed}
+.signtab td{border:1px solid #000;vertical-align:top;padding:6px 10px;font-size:15.5px;line-height:1.62;width:50%}
+.signtab td>div{display:flex;flex-wrap:wrap;gap:0 2.2em}
+.signtab td>div:first-child{font-size:17px}
