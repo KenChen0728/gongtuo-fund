@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.23.2';
+const VERSION = '2026.11.23.3';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -722,7 +722,7 @@ const wbLeft = k => (+(N.budget || {})[k] || 0) - wbUsed(k);
 const lowItems = () => wbItems().filter(k => { const b = +(N.budget || {})[k] || 0, r = wbLeft(k); return r < 0 || (b > 0 && r !== 0 && r < b * .1); });
 const wbMoves = () => (N.wbMoves || []).filter(x => x.y === CY);
 // 挪用預算：從還有餘額的項目轉到不夠的項目，業務費總額不變
-function moveDialog(to) {
+function moveDialog(to, needOv, onDone) {
   const items = wbItems(), dflt = to || lowItems().sort((a, b) => wbLeft(a) - wbLeft(b))[0] || items[0];
   ask('挪用委辦業務費', `<div class="mvgrid"><label class="mv-to">轉入（不夠用的項目）<select id="mvTo">${items.map(k => `<option value="${esc(k)}" ${k === dflt ? 'selected' : ''}>${esc(k)}（剩 ${fmt(wbLeft(k))}）</option>`).join('')}</select></label>
     <div class="mv-from"><div style="font-weight:700;margin-bottom:6px">從哪一項轉出<small class="meta" style="margin-left:8px">照餘額多到少排</small></div><div id="mvFrom" class="list"></div></div>
@@ -738,9 +738,10 @@ function moveDialog(to) {
     const rec = { id: Date.now().toString(36), y: CY, date: TODAY, from: f, to: t, amount: a };
     store.setSettings({ budget: B, wbMoves: [...(N.wbMoves || []), rec] }).catch(fail());
     toast(`已從${f}挪 ${fmt(a)} 元到${t}。`, () => undoMove(rec.id));
+    if (onDone) setTimeout(onDone, 250);
   }, '挪用');
   const fill = () => {
-    const t = $('#mvTo').value, need = Math.max(0, -wbLeft(t));
+    const t = $('#mvTo').value, need = needOv && t === to ? needOv : Math.max(0, -wbLeft(t));
     const src = items.filter(k => k !== t && wbLeft(k) > 0).sort((a, b) => wbLeft(b) - wbLeft(a));
     $('#mvFrom').innerHTML = src.map((k, i) => `<label class="row check" style="margin:0"><input type="radio" name="mvFrom" value="${esc(k)}" ${i === 0 ? 'checked' : ''}><span class="main">${esc(k)}</span><span class="amount">剩 ${fmt(wbLeft(k))}</span></label>`).join('') || '<div class="row"><div class="main meta">其他項目都沒有餘額了。</div></div>';
     const pick = () => { const f = (document.querySelector('[name=mvFrom]:checked') || {}).value; $('#mvAmt').value = need && f ? Math.min(need, wbLeft(f)) : ''; $('#mvErr').hidden = true };
@@ -1453,7 +1454,8 @@ function updateLockedInvoice(id, doc) {
   const old = S().invoices.find(x => x.id === id), nx = { ...old, ...doc }, ops = [{ c: 'invoices', id, update: doc }], msg = [];
   const v = old.voucher && S().vouchers.find(v => v.no === old.voucher);
   if (v) {
-    const amount = (v.ids || []).reduce((a, i) => a + (i === id ? amt(nx) : amt(S().invoices.find(x => x.id === i) || {})), 0);
+    const v2 = v.split2 && S().vouchers.find(x => x.no === v.split2 && !x.deleted);
+    const amount = (v.ids || []).reduce((a, i) => a + (i === id ? amt(nx) : amt(S().invoices.find(x => x.id === i) || {})), 0) - (v2 ? +v2.amount || 0 : 0);
     if (amount !== v.amount) {
       ops.push({ c: 'vouchers', id: v.no, update: { amount, ...(v.printed && v.amountPrinted == null ? { amountPrinted: v.amount } : {}) } });
       msg.push(`憑證 ${v.no} 改成 ${fmt(amount)} 元（原 ${fmt(v.amount)} 元）`);
@@ -1582,19 +1584,42 @@ $('#dlgWiz').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isCo
 
 /* ===== 合併成憑證 ===== */
 const autoDesc = list => { const cat = list[0].cat; if (cat === '幼兒食材') return '幼兒食材'; if (/外聘督導/.test(cat)) return [...new Set(list.map(x => `${x.m}/${x.d}${x.desc}`))].join('、'); return cat + '：' + [...new Set(list.map(x => x.desc))].join('、'); };
+/* 委辦業務費超支防呆（Hedy 11/23）：建立憑證時那一項會變負數，就要先選「從其他項目挪錢」或「拆成兩張憑證」
+   （委辦那張付到剩餘為止、發票貼這張；營運收入支應-業務費那張付超出的部分，類別沿用、編號接下一號）。不能照樣建立。 */
+let MG = null;
+function mergeGuardCalc(list) {
+  const f = list[0], total = list.reduce((a, x) => a + amt(x), 0);
+  if (!f || f.src !== '委辦費-業務費' || !+N.wbBizTotal || !wbItems().includes(f.cat)) return null;
+  const left = wbLeft(f.cat); if (total <= left) return null;
+  return { cat: f.cat, total, left: Math.max(0, left), over: total - Math.max(0, left), split: false };
+}
+function mergeGuardShow() {
+  const box = $('#mGuard'), go = $('#mGo'), list = [...sel].map(id => S().invoices.find(x => x.id === id)).filter(Boolean);
+  const keep = MG && MG.split; MG = mergeGuardCalc(list); if (MG && keep) MG.split = true;
+  box.hidden = !MG;
+  if (!MG) { go.removeAttribute('aria-disabled'); go.textContent = '建立憑證'; $('#mNo').textContent = nextNo(); return }
+  const n1 = nextNo(), n2 = nextNo(CY, CM, [n1]), whole = MG.left <= 0;
+  box.innerHTML = `<b>${esc(MG.cat)}${whole ? '已經沒有餘額' : `只剩 ${fmt(MG.left)} 元`}，這張 ${fmt(MG.total)} 元，做了會超支 ${fmt(MG.over)} 元。</b>請先選一種處理方式：
+   <div class="mgopts"><button type="button" class="btn" id="mgMove">從其他項目挪錢</button><button type="button" class="btn" id="mgSplit" aria-pressed="${MG.split}">${MG.split ? '✓ ' : ''}${whole ? '整張改由營運收入支應付' : '拆成兩張憑證'}</button></div>
+   ${MG.split ? `<div class="mgplan">${whole ? `<div>${esc(n1)}　營運收入支應-業務費　<b>${fmt(MG.total)}</b>（類別「${esc(MG.cat)}」，發票貼這張）</div>` : `<div>${esc(n1)}　委辦費-業務費　<b>${fmt(MG.left)}</b>（發票貼這張）</div><div>${esc(n2)}　營運收入支應-業務費　<b>${fmt(MG.over)}</b>（類別「${esc(MG.cat)}」）</div>`}</div>` : ''}`;
+  go.textContent = MG.split ? (whole ? '建立憑證（營運收入支應）' : '建立兩張憑證') : '建立憑證';
+  if (MG.split) go.removeAttribute('aria-disabled'); else go.setAttribute('aria-disabled', 'true');
+}
 function openMerge() {
   const list = [...sel].map(id => S().invoices.find(x => x.id === id)).filter(Boolean).sort((a, b) => a.ym - b.ym || a.d - b.d);
+  MG = null;
   $('#mNo').textContent = nextNo();
   $('#mPayee').textContent = list[0].payer === '主任' ? `${N.short}公托 ${N.director || '主任'}（主任代墊）` : nurseryPrefix(list[0].payer, ownName(list[0].payer));
   $('#mSrc').innerHTML = pill(list[0].src);
   $('#mDesc').value = autoDesc(list); $('#mNote').value = '';
   $('#mCount').textContent = list.length; $('#mAmt').textContent = fmt(list.reduce((a, x) => a + amt(x), 0));
+  mergeGuardShow();
   $('#dlgMerge').showModal();
 }
-async function createInvVoucher(list, desc, note) {
+async function createInvVoucher(list, desc, note, ov = {}, extra = []) {
   for (let tries = 0; tries < 3; tries++) {
-    const f = list[0], no = nextNo();
-    const v = { no, y: CY, m: CM, ym: CYM, payee: f.payer === '主任' ? (N.director || '主任') : f.payer, own: f.payer === '主任', src: f.src, desc, note: note || '', amount: list.reduce((a, x) => a + amt(x), 0), ids: list.map(x => x.id), kind: 'inv', cat: f.cat, printed: false, printedAt: '', deleted: false, createdAt: Date.now() };
+    const f = list[0], no = nextNo(CY, CM, extra);
+    const v = { no, y: CY, m: CM, ym: CYM, payee: f.payer === '主任' ? (N.director || '主任') : f.payer, own: f.payer === '主任', src: f.src, desc, note: note || '', amount: list.reduce((a, x) => a + amt(x), 0), ids: list.map(x => x.id), kind: 'inv', cat: f.cat, printed: false, printedAt: '', deleted: false, createdAt: Date.now(), ...ov };
     try { await store.createVoucher(v, v.ids); return v; }
     catch (e) { if (e.code !== 'taken') throw e; await new Promise(r => setTimeout(r, 600)); }
   }
@@ -1603,11 +1628,22 @@ async function createInvVoucher(list, desc, note) {
 $('#fMerge').addEventListener('submit', e => {
   e.preventDefault();
   const list = [...sel].map(id => S().invoices.find(x => x.id === id)).filter(Boolean).sort((a, b) => a.ym - b.ym || a.d - b.d);
-  const btn = $('#mGo'); btn.setAttribute('aria-disabled', 'true'); btn.textContent = '建立中…';
-  createInvVoucher(list, $('#mDesc').value.trim(), $('#mNote').value.trim())
-    .then(v => { sel.clear(); $('#dlgMerge').close(); render(); toast(`已建立憑證 ${v.no}。要印的時候到「更多 → 憑證與列印」。`) })
+  const btn = $('#mGo');
+  if (btn.getAttribute('aria-disabled') === 'true') return toast(MG ? `${MG.cat}的委辦費不夠，請先選「從其他項目挪錢」或「${MG.left <= 0 ? '整張改由營運收入支應付' : '拆成兩張憑證'}」。` : '建立中，請稍候。');
+  const desc = $('#mDesc').value.trim(), note = $('#mNote').value.trim(), g = MG && MG.split ? { ...MG } : null, label = btn.textContent;
+  btn.setAttribute('aria-disabled', 'true'); btn.textContent = '建立中…';
+  const join = (a, b) => [a, b].filter(Boolean).join('　');
+  const job = !g ? createInvVoucher(list, desc, note).then(v => [v])
+    : g.left <= 0 ? createInvVoucher(list, desc, join(note, `委辦費-業務費「${g.cat}」已無餘額，整張由營運收入支應-業務費支付。`), { src: '營運收入支應-業務費', srcFrom: '委辦費-業務費' }).then(v => [v])
+    : (async () => {
+      const v1 = await createInvVoucher(list, desc, note, { amount: g.left });
+      const v2 = await createInvVoucher(list, desc, join('', `發票正本附於憑證 ${v1.no}（委辦費-業務費）；發票共 ${fmt(g.total)} 元，本張支付超出委辦預算的 ${fmt(g.over)} 元。`), { src: '營運收入支應-業務費', amount: g.over, ids: [], splitOf: v1.no }, [v1.no]);
+      await store.update('vouchers', v1.no, { split2: v2.no, note: join(note, `發票共 ${fmt(g.total)} 元，其中 ${fmt(g.over)} 元由營運收入支應-業務費支付（憑證 ${v2.no}）。`) });
+      return [v1, v2];
+    })();
+  job.then(vs => { sel.clear(); MG = null; $('#dlgMerge').close(); render(); toast(`已建立憑證 ${vs.map(v => v.no).join('、')}。要印的時候到「更多 → 憑證與列印」。`) })
     .catch(fail('沒有建立成功，請確認網路後再按一次。'))
-    .finally(() => { btn.removeAttribute('aria-disabled'); btn.textContent = '建立憑證' });
+    .finally(() => { btn.removeAttribute('aria-disabled'); btn.textContent = label === '建立中…' ? '建立憑證' : label });
 });
 async function createHrVoucher(data, extra = []) {
   for (let tries = 0; tries < 3; tries++) {
@@ -2070,21 +2106,26 @@ document.addEventListener('click', e => {
   }
   if (t.id === 'rDateReset') { const { y, m } = SEL_M.fee; store.set('months', ymKey(y, m), { y, m, rcptDate: null }).catch(fail()); const r = autoReceiptDate(y, m); return toast(`${m} 月收據日期改回 ${r.m}/${r.d}。`) }
   if (t.id === 'nextNo') { SEL_M.vou = { y: CY, m: CM }; return go('vou') }
+  if (t.id === 'mgMove' && MG) return moveDialog(MG.cat, MG.over, mergeGuardShow);
+  if (t.id === 'mgSplit' && MG) { MG.split = !MG.split; return mergeGuardShow() }
   if (t.id === 'alertToggle') { alertOpen = !alertOpen; return renderAlerts() }
   if (t.dataset.printv) return printVoucher(S().vouchers.find(x => x.no === t.dataset.printv));
   if (t.dataset.cancelv) {
     const v = S().vouchers.find(x => x.no === t.dataset.cancelv);
     if (v.settled) { const st = S().settlements.find(s => s.id === v.settled); return toast(`這張已列在${st ? `${st.m} 月第 ${st.n} 次` : ''}零用金結報清單，請先到「零用金結算」按「退回」再取消。`) }
-    return ask(`取消憑證 ${v.no}`, `<p class="hint">${esc(v.desc)}，${fmt(v.amount)} 元。取消後${v.kind === 'inv' ? '這些發票會回到「還沒做憑證」，' : ''}憑證放進垃圾桶 30 天，可以救回。編號不會被重複使用；想讓下一張沿用這個編號，取消後到「更多 → 垃圾桶」按「永久刪除」。</p>`, () => {
-      store.batch([{ c: 'vouchers', id: v.no, update: { deleted: true, deletedAt: Date.now() } }, ...(v.ids || []).map(id => ({ c: 'invoices', id, update: { voucher: null } }))]).catch(fail());
-      toast(`已取消 ${v.no}。`);
-    }, '取消這張憑證', 'btn danger');
+    const mate = S().vouchers.find(x => !x.deleted && (x.no === v.split2 || x.no === v.splitOf)), both = [v, mate].filter(Boolean);
+    return ask(`取消憑證 ${both.map(x => x.no).join('、')}`, `<p class="hint">${esc(v.desc)}，${fmt(v.amount)} 元。${mate ? `這張和 ${esc(mate.no)} 是同一批發票拆成的兩張，會一起取消。` : ''}取消後${v.kind === 'inv' ? '這些發票會回到「還沒做憑證」，' : ''}憑證放進垃圾桶 30 天，可以救回。編號不會被重複使用；想讓下一張沿用這個編號，取消後到「更多 → 垃圾桶」按「永久刪除」。</p>`, () => {
+      store.batch([...both.map(x => ({ c: 'vouchers', id: x.no, update: { deleted: true, deletedAt: Date.now() } })), ...both.flatMap(x => (x.ids || []).map(id => ({ c: 'invoices', id, update: { voucher: null } })))]).catch(fail());
+      toast(`已取消 ${both.map(x => x.no).join('、')}。`);
+    }, mate ? '取消這兩張憑證' : '取消這張憑證', 'btn danger');
   }
   if (t.dataset.purgev) {
     const v = S().vouchers.find(x => x.no === t.dataset.purgev); if (!v) return;
-    return ask(`永久刪除 ${v.no}`, `<p class="hint">刪除後沒辦法救回，${esc(v.no)} 這個編號會空出來，下一張新做的${v.m} 月憑證會用這個編號。</p>${v.printed ? '<p class="hint">這張憑證已經印過，舊的紙本請作廢，以免和新的那張同號。</p>' : ''}`, () => {
-      store.batch([{ c: 'vouchers', id: v.no, remove: true }]).catch(fail('沒有刪除成功，請再試一次。'));
-      toast(`已永久刪除，下一張${v.m} 月憑證會用 ${v.no}。`);
+    // 拆單的兩張一起刪，不留下單獨一張營運收入的憑證
+    const both = [v, S().vouchers.find(x => x.deleted && (x.no === v.split2 || x.no === v.splitOf))].filter(Boolean).sort((a, b) => a.no < b.no ? -1 : 1), nos = both.map(x => x.no).join('、');
+    return ask(`永久刪除 ${nos}`, `<p class="hint">${both.length > 1 ? '這兩張是同一筆發票拆成的憑證，會一起刪除。' : ''}刪除後沒辦法救回，${esc(nos)} ${both.length > 1 ? '這兩個' : '這個'}編號會空出來，下一張新做的${v.m} 月憑證會用這個編號。</p>${both.some(x => x.printed) ? '<p class="hint">已經印過的紙本請作廢，以免和新的那張同號。</p>' : ''}`, () => {
+      store.batch(both.map(x => ({ c: 'vouchers', id: x.no, remove: true }))).catch(fail('沒有刪除成功，請再試一次。'));
+      toast(`已永久刪除，下一張${v.m} 月憑證會用 ${both[0].no}。`);
     }, '永久刪除', 'btn danger');
   }
   if (t.dataset.cashsel) { const id = t.dataset.cashsel; cashOff.has(id) ? cashOff.delete(id) : cashOff.add(id); return render() }
@@ -2097,7 +2138,8 @@ document.addEventListener('click', e => {
     const v = S().vouchers.find(x => x.no === t.dataset.restorev);
     const bad = (v.ids || []).some(id => { const x = S().invoices.find(i => i.id === id); return !x || x.voucher || x.deleted; });
     if (bad) return toast('這張憑證的發票已經做成別的憑證或被刪除，沒辦法救回。請重新勾選發票建立。');
-    store.batch([{ c: 'vouchers', id: v.no, update: { deleted: false, deletedAt: null } }, ...(v.ids || []).map(id => ({ c: 'invoices', id, update: { voucher: v.no } }))]).catch(fail()); toast(`已救回 ${v.no}。`);
+    const mate = S().vouchers.find(x => x.deleted && (x.no === v.split2 || x.no === v.splitOf)), both = [v, mate].filter(Boolean);
+    store.batch([...both.map(x => ({ c: 'vouchers', id: x.no, update: { deleted: false, deletedAt: null } })), ...both.flatMap(x => (x.ids || []).map(id => ({ c: 'invoices', id, update: { voucher: x.no } })))]).catch(fail()); toast(`已救回 ${both.map(x => x.no).join('、')}。`);
     return;
   }
   if (t.dataset.printset) { const s = S().settlements.find(x => x.id === t.dataset.printset); return openPreview({ title: `代墊金結報清單（${s.m} 月第 ${s.n} 次）`, pages: [cashSheet(s.rows, `${s.m} 月第 ${s.n} 次結算（${s.date}）`, s.y, s.m)] }) }
