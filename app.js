@@ -1896,6 +1896,8 @@ function bizSheet(y) {
   box(2, cIns, 3, cIns, null, { fill: 'EAF1DD' }); put(4, cIns, '兒童團體保險', { ...hd, fill: 'EAF1DD' }); put(5, cIns, null, { bold: true, fmt: XF });
   const head = (c, t, fill) => { box(2, c, 4, c, t, { ...hd, fill }); put(5, c, null, { bold: true, fmt: XF }) };
   head(cOp, '營運收入\n支應', 'DAEEF3'); head(cMeal, '餐點費', 'DAEEF3'); head(cQ, `${y}年\n提升托育品質`, 'E5DFEC'); head(cTot, '總計'); head(cAdm, `${y}年度\n行管費`, 'F2F2F2'); head(cRisk, risk || '風險預備金', 'FAEDA0');
+  // 資料列用金額那一欄的表頭顏色（Hedy 11/23）；委辦費（業務費、行管費）一律白色
+  const rowFill = { [cIns]: 'EAF1DD', [cOp]: 'DAEEF3', [cMeal]: 'DAEEF3', [cQ]: 'E5DFEC', [cRisk]: 'FAEDA0' };
   extra.forEach((s, i) => head(cRisk + 1 + i, s));
   if (+N.admBudget) C[L(cAdm) + 5].v = +N.admBudget;
   extra.concat(risk ? [risk] : []).forEach(s => { const b = +(N.cusBudget || {})[s]; if (b) C[L(s === risk ? cRisk : cRisk + 1 + extra.indexOf(s)) + 5].v = b });
@@ -1909,9 +1911,9 @@ function bizSheet(y) {
   }
   list.forEach((v, i) => {
     const r = top + i, c0 = colOf(v); rows[r] = 33;
-    const g = v.sum ? { fill: 'F2F2F2' } : {};
+    const fc = v.sum ? 'F2F2F2' : !v.byCat && rowFill[c0], g = fc ? { fill: fc } : {}, gAt = c => v.sum || c <= cTot || c === c0 ? g : {};
     put(r, 0, v.no, g); put(r, 1, v.sum ? '' : payeeOf(v), { ...g, wrap: true }); put(r, 2, v.src, { ...g, wrap: true }); put(r, 3, v.desc, { ...g, wrap: true, align: 'left' });
-    for (let c = 4; c <= last; c++) put(r, c, amtAt(v, c) || null, { ...g, fmt: XF });
+    for (let c = 4; c <= last; c++) put(r, c, amtAt(v, c) || null, { ...gAt(c), fmt: XF });
     put(r, cTot, c0 <= cQ ? +v.amount || 0 : 0, { ...g, fmt: XF }, `SUM(${L(4)}${r}:${L(cQ)}${r})`);
   });
   for (let r = top + list.length; r <= end; r++) { rows[r] = 33; for (let c = 0; c <= last; c++) put(r, c, null, { fmt: c > 3 ? XF : undefined }) }
@@ -1949,7 +1951,8 @@ function hrSheet(y) {
   put(7, 8, list.reduce((a, v) => a + (+v.amount || 0), 0), { fill: yel, fmt: XF }, `SUBTOTAL(9,I${top}:I${end})`);
   list.forEach((v, i) => {
     const r = top + i; rows[r] = 24;
-    const g = v.sum ? { fill: 'F2F2F2' } : {};
+    // 資料列用金額那一欄的表頭顏色（Hedy 11/23）；委辦費人事費一律白色
+    const fc = v.sum ? 'F2F2F2' : ['', 'EAF1DD', 'DAEEF3', 'FFF2CC'][colOf(v) - 4], g = fc ? { fill: fc } : {};
     put(r, 0, v.no, g); put(r, 1, v.payee, { ...g, wrap: true }); put(r, 2, v.src, { ...g, wrap: true }); put(r, 3, v.desc, { ...g, wrap: true, align: 'left' });
     for (let c = 4; c <= 7; c++) put(r, c, c === colOf(v) ? +v.amount || 0 : null, { ...g, fmt: XF });
     put(r, 8, +v.amount || 0, { ...g, fmt: XF }, `SUM(E${r}:H${r})`);
