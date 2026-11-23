@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.23.1';
+const VERSION = '2026.11.23.2';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -249,10 +249,9 @@ function manualExtra(y, m) {
 }
 const manualMonth = (y, m) => manualExtra(y, m).r;
 const manualPayroll = (y, m) => m <= manualUntil(y) && manualExtra(y, m).sysPay;   // 補登月份但人事費用系統的
-// 這個月要用哪一種：補登、系統、還沒到（空白）。下個月的月費會先算出來，所以下個月也列；更後面的月份有記帳才列
-const hasData = (y, m) => vouchersOf(y, m).length || incomesOf(y, m).length || monthDoc(y, m).payroll || Object.keys(monthDoc(y, m).fees || {}).length;
-const nextYM = () => shiftYM(CY, CM, 1);
-const monthMode = (y, m) => m <= manualUntil(y) ? 'manual' : ymNum(y, m) <= CYM || ymNum(y, m) === ymNum(nextYM().y, nextYM().m) || hasData(y, m) ? 'sys' : 'future';
+// 這個月要用哪一種：補登、系統、還沒到（空白）。還沒到的月份（例如 11 月看 12 月）等那個月 1 號才列進報表；
+// 下個月的月費、生日禮金可以先在月費頁、人事費頁做，只是報表先不算（11/23 Hedy）
+const monthMode = (y, m) => m <= manualUntil(y) ? 'manual' : ymNum(y, m) <= CYM ? 'sys' : 'future';
 function annual(y) {
   const months = Array.from({ length: 12 }, (_, i) => { const mode = monthMode(y, i + 1); return { mode, d: mode === 'manual' ? manualMonth(y, i + 1) : mode === 'sys' ? sysMonth(y, i + 1) : null } });
   const vals = k => months.map(x => x.d ? x.d[k] : null);
@@ -457,7 +456,7 @@ function leaveGuard(next) {
 }
 function go(v, force) {
   if (!force && v !== view && dirty && guardView()) return leaveGuard(() => go(v, true));
-  dirty = false; if (v !== view) FP = null;
+  dirty = false; if (v !== view) { FP = null; alertOpen = false }
   document.querySelectorAll('dialog[open]').forEach(d => { if (d.id !== 'dlgAlert') d.close() });
   view = v; $('#app').dataset.view = v; $('#pageName').textContent = NAMES[v]; $('#helpQ').hidden = v === 'help';
   document.querySelectorAll('.tab[data-view]').forEach(b => { if (b.dataset.view === v) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current') });
@@ -482,9 +481,13 @@ function render() {
   updateMerge(); renderAlerts(); renderNet();
   $('#add').hidden = innerWidth < 1000 && !(view === 'home' || view === 'inv');
 }
+// 重要提醒：首頁完整列出；其他頁收成一行「重要提醒（2）」，點了才展開（11/23 Hedy）
+let alertOpen = false;
 function renderAlerts() {
-  const a = getAlerts(), b = $('#alertBar'); b.hidden = !a.length;
-  b.innerHTML = `<b>重要提醒（${a.length}）</b>` + a.map(x => `<button type="button" data-go="${x.go}"><span>${esc(x.t)}</span><span aria-hidden="true">›</span></button>`).join('');
+  const a = getAlerts(), b = $('#alertBar'), full = view === 'home' || alertOpen; b.hidden = !a.length;
+  b.classList.toggle('mini', !full);
+  b.innerHTML = (view === 'home' ? `<b>重要提醒（${a.length}）</b>` : `<button type="button" class="alerthead" id="alertToggle" aria-expanded="${full}"><b>重要提醒（${a.length}）</b><span>${full ? '收起 ︿' : '點開看 ﹀'}</span></button>`)
+    + (full ? a.map(x => `<button type="button" data-go="${x.go}"><span>${esc(x.t)}</span><span aria-hidden="true">›</span></button>`).join('') : '');
 }
 function monthNav(key) {
   const s = SEL_M[key];
@@ -946,7 +949,7 @@ function set() {
    <div class="actions start"><button type="button" class="btn" id="addCat">＋ 新增類別</button></div>
   </details>
   <details class="card pickbox"><summary>重要提醒的規則</summary>
-   <p class="hint" style="font-size:15px">登入時會跳出重要提醒，勾選並按「已了解」後，下次登入不再跳出；每月 20 號以後第一次登入會再跳一次。提醒會一直顯示在頁面最上方，處理好才消失。</p>
+   <p class="hint" style="font-size:15px">登入時會跳出重要提醒，勾選並按「已了解」後，下次登入不再跳出；每月 20 號以後第一次登入會再跳一次。提醒會一直顯示在頁面最上方（首頁完整列出，其他頁收成一行，點開才展開），處理好才消失。</p>
    <div class="actions start"><button type="button" class="btn" id="demoAlert">再看一次提醒</button></div>
   </details>
   <details class="card pickbox" id="bkCard" ${needAllBk() ? 'open' : ''}><summary>備份</summary>
@@ -1081,7 +1084,8 @@ function rcptPage({ no, y, date, payer, desc, total, third }) {
    <tbody><tr><td>${esc(payer)}</td><td style="white-space:pre-line">${esc(desc)}</td><td style="text-align:right">$${fmt(total)}</td></tr>
    <tr><td colspan="3" style="height:auto">金額 AMOUNT　新臺幣 ${chNum(total)}</td></tr></tbody></table>
    <div style="font-size:14px;margin-top:4px">經手人：</div></div><div class="side-note">${lab}</div></div>`;
-  return one('第一聯：協會留存聯') + '<div class="rcut"></div>' + one('第二聯：公托留存聯') + '<div class="rcut"></div>' + one(third);
+  // 三聯平均分配：一頁切成三等份，裁切線剛好在 1/3、2/3
+  return `<div class="r3"><div class="rcopy">${one('第一聯：協會留存聯')}</div><div class="rcopy">${one('第二聯：公托留存聯')}</div><div class="rcopy">${one(third)}</div></div>`;
 }
 // 金額寫法照範本：$1,234；負數 ($1,234)
 const money = v => v == null ? '' : v < 0 ? `<span class="neg">(${'$' + fmt(-v)})</span>` : '$' + fmt(v);
@@ -2066,6 +2070,7 @@ document.addEventListener('click', e => {
   }
   if (t.id === 'rDateReset') { const { y, m } = SEL_M.fee; store.set('months', ymKey(y, m), { y, m, rcptDate: null }).catch(fail()); const r = autoReceiptDate(y, m); return toast(`${m} 月收據日期改回 ${r.m}/${r.d}。`) }
   if (t.id === 'nextNo') { SEL_M.vou = { y: CY, m: CM }; return go('vou') }
+  if (t.id === 'alertToggle') { alertOpen = !alertOpen; return renderAlerts() }
   if (t.dataset.printv) return printVoucher(S().vouchers.find(x => x.no === t.dataset.printv));
   if (t.dataset.cancelv) {
     const v = S().vouchers.find(x => x.no === t.dataset.cancelv);
