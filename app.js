@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.23.5';
+const VERSION = '2026.11.23.6';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -603,7 +603,7 @@ function fee() {
   <div class="rdate"><label for="rDate">${m} 月收據日期</label><input type="date" id="rDate" value="${isoOf(rd)}" max="9999-12-31">${rd.set ? '<button type="button" class="btn" id="rDateReset">改回預設</button>' : ''}<span class="meta">收據上印「${rocDate(rd)}」。${rd.set ? '這是這個月自己選的日期。' : `預設每月 ${+N.rcptDay || 15} 號，遇週末順延，可以改成別天。`}</span></div>
   <div class="tally"><span>應收<b>${fmt(total)}</b></span><span>收據號碼<b style="font-size:18px">${kids.length ? rcptNo(Math.min(...nos)) + '–' + rcptNo(Math.max(...nos)) : '—'}</b></span><span class="${d.rcptPrinted ? '' : 'warn'}">收據<b style="font-size:18px">${d.rcptPrinted ? '已印' : '還沒印'}</b></span></div>
   <div class="actions start"><button type="button" class="btn primary" id="printRcptAll" ${kids.length ? '' : 'aria-disabled="true"'}>列印收據</button><button type="button" class="btn" id="addKid">＋ 新增幼兒</button><button type="button" class="btn" id="fpStart" ${FP ? 'aria-pressed="true"' : ''}>${FP ? '✓ 勾選多張中' : '勾選多張（改日期／一起印）'}</button><button type="button" class="btn" id="borrow">協會借用號碼</button></div>
-  <div class="actions start"><button type="button" class="btn" id="printSign" ${kids.length ? '' : 'aria-disabled="true"'}>家長簽收單（${m} 月）</button><button type="button" class="btn" id="exportFee">匯出 ${y} 年月費 Excel</button></div>
+  <div class="actions start"><button type="button" class="btn" id="printSign" ${kids.length ? '' : 'aria-disabled="true"'}>家長簽收單（${m} 月）</button><button type="button" class="btn" id="exportFee">匯出 ${y} 年月費 Excel</button>${ADMIN ? `<button type="button" class="btn" id="feeAll">管理者：四間 ${y} 年月費 Excel</button>` : ''}</div>
   ${FP ? `<div class="status info"><b>已勾 <span id="fpTopCount">${FP.size}</span> 張。</b>勾好之後在畫面最下方：<br>・要<b>一起印</b>：按「列印勾選的」，號碼從下一號依序給勾選的。<br>・要<b>改日期</b>：選日期後按「套用日期」，只改勾選的這幾張，沒勾的維持 ${md(rd)}。<br>只印一張的話，不用勾選，直接按那位孩子的「印這張」。</div>` : ''}
   <p class="hint">名單沿用上個月，月費和餐點費依上課天數和生日自動算。有延托、保險、退費的孩子，按「修改」再填。${d.rcptPrinted ? '印過的號碼不會再變；之後新增的孩子會用新的號碼。' : '收據號碼在列印時確定，印之前可能會變。'}</p>
   ${earlierUnprinted(y, m) ? `<p class="status">${earlierUnprinted(y, m)} 月的收據還沒印。先印這個月的話，${earlierUnprinted(y, m)} 月的號碼會排在這個月後面。</p>` : ''}
@@ -835,8 +835,8 @@ function vou() {
     <div class="row"><div class="main"><div class="title"><span class="amount">${pre(y, m)}01</span>　${esc(N.firstItem)}</div><div class="meta">${pill('委辦費-業務費')}</div></div><span class="amount">${fmt(d.supervisor ?? N.supervisor)}</span></div>
     ${pay.map((r, i) => `<div class="row"><div class="main"><div class="title"><span class="amount">${pre(y, m)}${String(i + 2).padStart(2, '0')}</span>　${esc(r.name)} ${y}年${m}月薪資</div><div class="meta">${pill(paySrc(r))}${r.split ? `<span>拆單：總額 ${fmt(r.amount)}，營運那份在薪資(2)</span>` : ''}</div></div><span class="amount">${fmt(payAmt(r))}</span></div>`).join('')}</div></details>` : ''}
   ${list.length ? `<div class="list">${list.map(v => `<div class="row"><div class="main"><div class="title"><span class="amount">${esc(v.no)}</span>　${esc(v.desc)}</div>
-    <div class="meta">${pill(v.src)}<span>受款人：${esc(v.kind === 'inv' ? payeeLabel(v) : v.payee)}</span>${v.kind === 'inv' || rcvKind(v) ? `${v.printed ? `<span class="pill p-done">已印 ${esc(v.printedAt)}</span>` : '<span class="pill p-todo">還沒印</span>'}${rcvKind(v) ? '<span class="pill p-rcv">附領據</span>' : ''}<span>${isWB(v) ? '一般紙' : '色紙'}</span>` : '<span>另外製作</span>'}${v.note ? '<span>有備註</span>' : ''}${v.printed && v.amountPrinted != null && v.amountPrinted !== v.amount ? `<span class="when-warn">印後改過金額（紙本是 ${fmt(v.amountPrinted)}）</span>` : ''}</div></div>
-    <span class="amount">${fmt(v.amount)}</span><div class="acts">${v.kind === 'inv' ? `<button type="button" class="edit" data-vinv="${esc(v.no)}">修改</button>` : ''}${v.kind === 'inv' || rcvKind(v) ? printBtn(v) : ''}<button type="button" class="edit" data-cancelv="${esc(v.no)}">取消</button></div></div>`).join('')}</div>` : '<div class="empty">這個月還沒有憑證。到「發票」勾選發票，就能合併成憑證。</div>'}`;
+    <div class="meta">${pill(v.src)}<span>受款人：${esc(v.kind === 'inv' ? payeeLabel(v) : v.payee)}</span>${v.kind === 'inv' || rcvKind(v) ? `${v.printed ? `<span class="pill p-done">已印 ${esc(v.printedAt)}</span>` : '<span class="pill p-todo">還沒印</span>'}${rcvKind(v) ? '<span class="pill p-rcv">附領據</span>' : ''}<span>${isWB(v) ? '一般紙' : '色紙'}</span>` : '<span>另外製作</span>'}${v.note ? `<span>備註：${esc(v.note.length > 24 ? v.note.slice(0, 24) + '…' : v.note)}</span>` : ''}${v.printed && v.notePrinted != null && v.notePrinted !== (v.note || '') ? '<span class="when-warn">印後改過備註，要重印紙本才會更新</span>' : ''}${v.printed && v.amountPrinted != null && v.amountPrinted !== v.amount ? `<span class="when-warn">印後改過金額（紙本是 ${fmt(v.amountPrinted)}）</span>` : ''}</div></div>
+    <span class="amount">${fmt(v.amount)}</span><div class="acts">${v.kind === 'inv' ? `<button type="button" class="edit" data-vinv="${esc(v.no)}">修改</button>` : ''}${v.kind === 'inv' || rcvKind(v) ? printBtn(v) : ''}<button type="button" class="edit" data-vnote="${esc(v.no)}">備註</button><button type="button" class="edit" data-cancelv="${esc(v.no)}">取消</button></div></div>`).join('')}</div>` : '<div class="empty">這個月還沒有憑證。到「發票」勾選發票，就能合併成憑證。</div>'}`;
 }
 const pettyPicked = () => sortPetty(pettyOpen()).filter(x => !cashOff.has(x.id));
 const nextSettleN = () => Math.max(0, ...S().settlements.filter(s => s.y === CY && s.m === CM).map(s => +s.n || 0)) + 1;
@@ -955,8 +955,8 @@ function set() {
    <div class="actions start"><button type="button" class="btn" id="demoAlert">再看一次提醒</button></div>
   </details>
   <details class="card pickbox" id="bkCard" ${needAllBk() ? 'open' : ''}><summary>備份</summary>
-   ${ADMIN ? `<div class="status ${needAllBk() ? '' : 'info'}">管理者：一次下載四間公托的每月報表（Excel，一間一張工作表）和備份（還原用）。${allBkDone() ? `這台裝置上次下載的是 ${String(allBkDone()).slice(0, -2)} 年 ${+String(allBkDone()).slice(-2)} 月的。` : '這台裝置還沒下載過。'}每月 25 號起會提醒。</div>
-   <div class="actions start"><button type="button" class="btn primary" id="backupAll">一次下載四間</button></div>` : ''}
+   ${ADMIN ? `<div class="status ${needAllBk() ? '' : 'info'}">管理者：一次下載四間公托的每月報表（Excel，一間一張工作表）和備份（還原用）。${allBkDone() ? `這台裝置上次下載的是 ${String(allBkDone()).slice(0, -2)} 年 ${+String(allBkDone()).slice(-2)} 月的。` : '這台裝置還沒下載過。'}每月 25 號起會提醒。<br>「四間的月費」給協會出納用：一間一張工作表，1～12 月左右排開。</div>
+   <div class="actions start"><button type="button" class="btn primary" id="backupAll">一次下載四間</button><button type="button" class="btn" id="feeAll">四間的月費（Excel）</button></div>` : ''}
    <p class="hint" style="font-size:15px">資料存在雲端，換手機或電腦都還在。建議每個月下載一份備份存到電腦。萬一資料被改錯，可以用備份檔還原。</p>
    <div class="actions start"><button type="button" class="btn" id="backup">下載備份</button><button type="button" class="btn" id="restore">從備份還原</button></div>
   </details>
@@ -968,13 +968,13 @@ const HELP = [
   { id: 'start', t: '第一次使用', shot: 'set', steps: ['到「更多 → 設定」，打開「公托資料」，填主任姓名和計畫主持人（01 號受款人），按「儲存公托資料」。', '打開「員工名單」，一行一位，順序就是薪資憑證的編號（第一位是 02）。', '到「報表」頁的「委辦費預算與挪用 → 設定預算」，依契約書填人事費、業務費總額和各細項。', '到「月費」按「＋ 新增幼兒」，輸入座號、姓名和生日。'] },
   { id: 'add', t: '輸入發票', shot: 'dlginv', steps: ['拿到發票就按「＋ 新增發票」。', '代墊人預設是主任；付給廠商的選「付給廠商」並填廠商名稱。', '年、月已帶好，選日期、類別，填品名、數量和單價。經費來源會依類別自動帶出。', '不習慣一個畫面填很多欄位，可以在「本月」或「設定」改成一步一步模式。'] },
   { id: 'merge', t: '合併成憑證', shot: 'merge', steps: ['到「發票」，還沒做憑證的發票會照「類別＋付款對象」分組，同一組就能合成一張憑證。要印色紙的（營運收入支應、提升托育品質）排上面，委辦費（一般紙）排下面。', '按組名右邊的「全選這組」，或自己勾選要合併的幾張。', '按下方「合併成憑證」，編號、受款人、經費來源、用途說明、金額都會自動帶入。', '需要時可以改用途說明，或加一行備註（會印在簽章欄下方）。', '建立憑證需要網路，避免兩台裝置用到同一個編號。'] },
-  { id: 'print', t: '列印憑證', shot: 'print', steps: ['到「更多 → 憑證與列印」，按「列印憑證」。', '還沒印的會先勾好；要補印的，在「要印哪幾張」清單自己勾起來。', '先印第 1 批委辦費（一般紙），再印第 2 批其他經費來源（色紙），畫面會說要放幾張色紙。', '可以左右滑動或按「上一張／下一張」看每一張。電腦和平板的預覽上方有「－ ＋」可以放大縮小，按「符合視窗」回到原本大小（手機不顯示，避免誤觸）。', '這個月有在系統之外先做過憑證（手寫、Excel）：按「設定起始編號」填已經用到第幾號，系統從下一號接著編。頁面右上角的「下一張憑證」隨時顯示下一張的編號。', '印出後才發現發票金額錯了：按那張憑證的「修改」，選要改的發票，改好後憑證金額、結報清單和年度報表會一起更新，編號不變。紙本手改就好，不一定要重印。', '按「匯出業務費明細（Excel）」，下載照協會格式的全年業務費經費明細：每張憑證一列，金額放在對應的欄（委辦業務費各細項、兒童團體保險、營運收入支應、餐點費、提升托育品質、行管費），上面有預算和黃色的剩餘。營運收入支應、餐點費這幾欄的預算系統沒有，匯出後自己填。'] },
+  { id: 'print', t: '列印憑證', shot: 'print', steps: ['到「更多 → 憑證與列印」，按「列印憑證」。', '還沒印的會先勾好；要補印的，在「要印哪幾張」清單自己勾起來。', '先印第 1 批委辦費（一般紙），再印第 2 批其他經費來源（色紙），畫面會說要放幾張色紙。', '可以左右滑動或按「上一張／下一張」看每一張。電腦和平板的預覽上方有「－ ＋」可以放大縮小，按「符合視窗」回到原本大小（手機不顯示，避免誤觸）。', '這個月有在系統之外先做過憑證（手寫、Excel）：按「設定起始編號」填已經用到第幾號，系統從下一號接著編。頁面右上角的「下一張憑證」隨時顯示下一張的編號。', '印出後才發現發票金額錯了：按那張憑證的「修改」，選要改的發票，改好後憑證金額、結報清單和年度報表會一起更新，編號不變。紙本手改就好，不一定要重印。', '憑證做好後還要補備註（例如「11/20 園務會議，誤餐費」）：按那張憑證的「備註」修改，不用取消重做。已經印過的，改了要重印才會出現在紙上，也可以直接手寫。', '按「匯出業務費明細（Excel）」，下載照協會格式的全年業務費經費明細：每張憑證一列，金額放在對應的欄（委辦業務費各細項、兒童團體保險、營運收入支應、餐點費、提升托育品質、行管費），上面有預算和黃色的剩餘。營運收入支應、餐點費這幾欄的預算系統沒有，匯出後自己填。'] },
   { id: 'cash', t: '零用金結算', shot: 'cash', steps: ['每月兩次，到「更多 → 零用金結算」。', '清單列主任代墊的發票，還有生日禮金、考核獎金（主任代墊），照憑證編號排列，會計可以拿著憑證依序對帳。', '預設全部勾選；這次只要結算其中幾張，把其他的勾勾拿掉，沒勾的會留到下一次。', '按「結算到今天」。還有發票沒做憑證、憑證沒印的，會先提醒你。', '結算過的清單在下方「已結算」，可以再列印；結算後才發現問題，按「退回」，發票回到本期改好再重新結算。'] },
   { id: 'staff', t: '人事費', shot: 'staff', steps: ['薪資清冊做好後，到「更多 → 人事費」。', '每位員工填這個月的「薪資總額」，經費來源預設委辦費-人事費。', '委辦人事費不夠時，按那位員工的「拆單」：下面會多兩行，① 填委辦費-人事費付多少，② 營運收入支應-人事費自動算（總額減委辦）。按「儲存本月人事費」時，營運那份會另外建一張「薪資(2)」憑證。', '按「儲存本月人事費」。員工的生日月份在「設定 → 員工名單」填好，生日那個月儲存人事費時會自動建立生日禮金（預設 500 元），首頁也會提醒。', '生日禮金、考核獎金和外聘督導費的憑證要附領款收據：建立後人事費頁最上面會列出「還沒填寫列印」的，按綠色的「列印＋領據」先填領款收據（日期、姓名、服務單位等；地址和身分證字號可以留空給領款人手寫，填了也不會存起來），印成上面粘存單、下面領款收據。', '考核獎金：打開「考核獎金（一次填所有員工）」，選期別，每位員工選等第（優等 5,000、甲等 3,000 會自動帶入，可改），按「建立考核獎金憑證」。', '12 月會多一區「年度年終獎金」，每位員工直接填金額，按「建立年終獎金憑證」一次做好。代班薪資和其他月份的生日禮金、年終獎金在下方「其他人事支出」新增。', '按「匯出人事費明細（Excel）」，下載照協會格式的全年人事費經費明細：每月薪資、薪資(2)、生日禮金、考核獎金、年終獎金每張一列，上面有委辦人事費預算、已用幾 %、剩餘。系統啟用前已用、從 Excel 補登的月份各一列合計（灰底）。看哪一年就匯出哪一年，要匯出去年的，先把月份切到去年。'] },
   { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。餐點費看孩子到當月 1 號滿幾個月：未滿 6 個月不收、未滿 1 歲 300 元、滿 1 歲 600 元。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。延托日期、退費原因（選填）會印在家長簽收單的金額後面。備註會列在月費表下方，也會印在那位孩子的收據摘要裡。月費、餐點費預設系統算，要改金額就在「修改」裡的「月費」「餐點費」欄填數字，清空就回到系統算的。', '按「家長簽收單」印這個月給家長簽名的學費明細，一頁 10 位（2 欄 × 5 列）。按「匯出月費 Excel」下載全年的月費表：1～12 月左右排開，每個月有編碼（收據號碼）、座號、姓名、月費、餐費、保險費、延托費、退費、總計、合計和備註，每記一個月就多一個月。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變；每年 1 月從 001 號重新開始。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。', '收據日期在頁面最上面，預設每月 15 號（遇週末順延），每個月可以自己改；預設幾號在「設定 → 收據」改，優化比、契約價金也可以設不同的預設日。', '每位孩子那一列都寫收據號碼和日期；只印一張就按那一列的「印這張」。', '要一次印好幾張，或改好幾張的日期：按「勾選多張（改日期／一起印）」，勾選後在畫面最下方按「列印勾選的」，或選日期按「套用日期」（只改勾選的，沒勾的維持原日期）。', '頁面下方「請款收據」：1、4、7、10 月會出現優化比（繳款人預設屏東縣政府；1 月是前一年第四期），1、2、7、10 月會出現契約價金（繳款人預設協會）。按「填寫」確認金額、貼上摘要，再按「列印」。其他要開的收據按「＋ 其他收據」。'] },
   { id: 'report', t: '報表', shot: 'report', steps: ['「年度經費報表」照每月報表的格式，自動算每月收入、支出、損益，和委辦費、行管費用了幾 %。', '優化比、提升托育品質、縣府補助款到帳時，按「＋ 新增撥款收入」；補助款要選期別（第一期、第二期⋯），每一期各一列。', '按「列印（A4 橫式）」印一頁；按「匯出 Excel」下載和原本格式一樣的 Excel（標楷體、顏色、公式）。', '委辦業務費有項目快用完或超支時，報表頁會列出「不夠用的項目」，按「補足」選要從哪一項轉出、金額，業務費總額不變；挪用紀錄可以還原。', '系統啟用前的月份，按「從 Excel 補登」選原本的經費明細檔，核對數字後按「補登」。補登之後才在系統新增的憑證、撥款收入會自動加上去；Excel 那個月沒有月費的，用系統算的月費。Excel 裡系統沒有固定位置的列（例如開辦費）可以勾選匯入成「其他經費來源」，列在報表最下方，連年度預算一起帶入；已經補登過的話，選「只加入勾選的其他經費來源」，原本的數字不會動。要交縣府時按「產出核銷報表」。'] },
   { id: 'trash', t: '刪錯了怎麼辦', shot: 'trash', steps: ['刪除的發票、取消的憑證會在「更多 → 垃圾桶」放 30 天。', '按「救回」就回到原本的地方，任何一台裝置都能救。', '剛刪掉時，畫面下方的提示也有「復原」可以按。', '憑證做錯想沿用同一個編號：先取消憑證，再到垃圾桶按「永久刪除」，下一張新做的憑證就會用這個編號。'] },
-  { id: 'backup', t: '備份與還原', shot: 'backup', steps: ['建議每個月到「更多 → 設定 → 備份」按「下載備份」，存到電腦。', '萬一資料被改錯，按「從備份還原」，選那個備份檔。', '還原前會先自動下載一份目前的資料，還原錯了還能再還原回來。', '備份之後才新增的資料不會被刪掉。', '管理者每月 25 號起會看到提醒，到「設定 → 備份」按「一次下載四間」，會下載四間的每月報表（Excel）和備份（還原用）兩個檔案。還原時選這個四間的備份檔也可以，會自動取出目前這間。'] },
+  { id: 'backup', t: '備份與還原', shot: 'backup', steps: ['建議每個月到「更多 → 設定 → 備份」按「下載備份」，存到電腦。', '萬一資料被改錯，按「從備份還原」，選那個備份檔。', '還原前會先自動下載一份目前的資料，還原錯了還能再還原回來。', '備份之後才新增的資料不會被刪掉。', '管理者每月 25 號起會看到提醒，到「設定 → 備份」按「一次下載四間」，會下載四間的每月報表（Excel）和備份（還原用）兩個檔案。還原時選這個四間的備份檔也可以，會自動取出目前這間。', '協會出納要四間的月費：管理者到「設定 → 備份」按「四間的月費（Excel）」，或在月費頁按「管理者：四間月費 Excel」（匯出月費頁正在看的那一年）。一個檔案、一間一張工作表，1～12 月左右排開。'] },
   { id: 'install', t: '安裝成 App', steps: ['iPhone、iPad：用 Safari 開啟，按分享 →「加入主畫面」。', 'Android：用 Chrome 開啟，按右上選單 →「加到主畫面」或「安裝應用程式」。', '電腦（Windows、Mac、Chromebook）：用 Chrome 或 Edge 開啟，按網址列右邊的安裝圖示。', '從 LINE 點開的話，請先選「用預設瀏覽器開啟」，登入才會留下來。'] },
 ];
 const HELP_OF = { home: 'add', inv: 'merge', fee: 'fee', report: 'report', vou: 'print', cash: 'cash', staff: 'staff', trash: 'trash', set: 'start' };
@@ -1044,7 +1044,7 @@ function voucherSheet(v, rcv) {
 }
 // 列印單張憑證：要附領據的先填領據資料（不會存起來）
 function printVoucher(v) {
-  const done = () => store.update('vouchers', v.no, { printed: true, printedAt: TODAY, amountPrinted: null }).catch(fail());
+  const done = () => store.update('vouchers', v.no, { printed: true, printedAt: TODAY, amountPrinted: null, notePrinted: null }).catch(fail());
   if (!rcvKind(v)) return openPreview({ title: `支出憑證 ${v.no}`, pages: [voucherSheet(v)], onPrint: done });
   const r = rcvDefault(v), f = (id, label, val, ph = '', area) => `<label>${label}${area ? `<textarea id="${id}" rows="2" placeholder="${ph}">${esc(val)}</textarea>` : `<input type="text" id="${id}" value="${esc(val)}" placeholder="${ph}">`}</label>`;
   ask(`${v.no} 領款收據`, `<p class="hint" style="font-size:14px">這些資料只用來列印，<b>不會存起來</b>。空白的欄位會印成空格，讓領款人手寫。</p>
@@ -1387,7 +1387,7 @@ function showVP(keep) {
     title: `列印憑證（${y} 年 ${m} 月）`, pages: selV.map(v => voucherSheet(v)), tools, side, keep,
     goText: VP.batch === 1 ? `列印第 1 批（${selV.length} 張）` : `列印第 2 批（${selV.length} 張色紙）`,
     onPrint: () => {
-      store.batch(selV.map(v => ({ c: 'vouchers', id: v.no, update: { printed: true, printedAt: TODAY, amountPrinted: null } }))).catch(fail());
+      store.batch(selV.map(v => ({ c: 'vouchers', id: v.no, update: { printed: true, printedAt: TODAY, amountPrinted: null, notePrinted: null } }))).catch(fail());
       selV.forEach(v => VP.chosen.delete(v.no));
       if (VP.batch === 1 && cnt(2)) { VP.batch = 2; toast(`第 1 批已印好。接著印第 2 批，請先放 ${cnt(2)} 張色紙。`); }
       else toast(`已印 ${selV.length} 張，已標記「已印」。`);
@@ -2012,6 +2012,20 @@ function feeYearSheet(y) {
 }
 function exportBiz() { const y = SEL_M.vou.y; saveXlsx(bizSheet(y), `${y}年${N.short}委辦費-業務費經費明細.xlsx`) }
 function exportStaff() { const y = SEL_M.staff.y; saveXlsx(hrSheet(y), `${y}年${N.short}委辦費-人事費經費明細.xlsx`) }
+// 管理者：四間的月費全年表，一間一張工作表（協會出納每月要用）
+async function feeAll(y) {
+  if (!ADMIN) return;
+  if (!navigator.onLine && !DEMO) return toast('下載四間的資料需要網路。');
+  toast('正在準備四間公托的月費…');
+  try {
+    const ids = Object.keys(NURSERIES), all = {};
+    for (const n of ids) all[n] = await store.fetchAll(n);
+    const sheets = ids.map(n => withNursery(n, all[n], () => ({ ...feeYearSheet(y), name: `${N.short}${y}年收費`.slice(0, 31) })));
+    const { writeXlsx } = await import('./xlsx.js');
+    const a = document.createElement('a'); a.href = URL.createObjectURL(writeXlsx(sheets)); a.download = `四間公托月費-${y}年-${TODAY_ISO}.xlsx`; document.body.appendChild(a); a.click(); a.remove();
+    toast('已下載四間的月費 Excel（一間一張工作表）。');
+  } catch (e) { console.error(e); toast('下載沒有完成，請確認網路後再試一次。') }
+}
 function exportFee() { const y = SEL_M.fee.y; saveXlsx(feeYearSheet(y), `${y}年${N.short}收費.xlsx`) }
 // 家長簽收單：一頁 2×5 格（照「幼兒學費明細」），延托和退費的日期／原因印在金額後面
 function signPages(y, m) {
@@ -2099,6 +2113,13 @@ document.addEventListener('click', e => {
   if (t.dataset.sel) { const id = t.dataset.sel; sel.has(id) ? sel.delete(id) : sel.add(id); t.setAttribute('aria-checked', sel.has(id)); syncGrpBtns(); return updateMerge() }
   if (t.dataset.selgrp) { const ids = t.dataset.selgrp.split(','); if (grpAll(ids)) ids.forEach(id => sel.delete(id)); else { sel.clear(); ids.forEach(id => sel.add(id)) } document.querySelectorAll('[data-sel]').forEach(b => b.setAttribute('aria-checked', sel.has(b.dataset.sel))); syncGrpBtns(); return updateMerge() }
   if (t.dataset.edit) { const id = t.dataset.edit; if (t.closest('#dlgAsk')) { $('#dlgAsk').close(); return setTimeout(() => editInvGuard(id)) } return editInvGuard(id) }
+  if (t.dataset.vnote) {          // 憑證做好後也能改備註（印在簽章欄下方）
+    const v = S().vouchers.find(x => x.no === t.dataset.vnote); if (!v) return;
+    return ask(`憑證 ${v.no} 的備註`, `<label>備註（選填，會印在簽章欄下方）<textarea id="vNoteIn" placeholder="例如：115年11月20日園務會議，誤餐費一人120元，故此次核銷XXX元">${esc(v.note || '')}</textarea></label>${v.printed ? '<p class="hint" style="font-size:15px">這張已經印過了：改好後要重印才會出現在紙上，也可以直接在紙本上手寫。</p>' : ''}`, () => {
+      const note = $('#vNoteIn').value.trim(); if (note === (v.note || '')) return;
+      store.update('vouchers', v.no, { note, ...(v.printed && v.notePrinted == null ? { notePrinted: v.note || '' } : {}) }).then(() => toast('備註已儲存。')).catch(fail());
+    }, '儲存備註');
+  }
   if (t.dataset.vinv) {          // 憑證的「修改」：一張發票直接改；好幾張先選要改哪一張
     const v = S().vouchers.find(x => x.no === t.dataset.vinv), list = (v.ids || []).map(id => S().invoices.find(x => x.id === id)).filter(Boolean);
     if (list.length === 1) return editInvGuard(list[0].id);
@@ -2321,6 +2342,7 @@ document.addEventListener('click', e => {
     case 'demoAlert': return getAlerts().length ? maybeAlert(true) : toast('目前沒有重要提醒。');
     case 'backup': return backup();
     case 'backupAll': return backupAll();
+    case 'feeAll': return feeAll(view === 'fee' ? SEL_M.fee.y : CY);
     case 'restore': return $('#restoreFile').click();
     case 'logout': return ask(DEMO ? '離開範例資料' : '登出這台裝置', `<p class="hint">${DEMO ? '範例資料不會保留。' : '登出後要重新輸入序號才能進入。資料都存在雲端，不會不見。'}</p>`, () => { if (DEMO) leaveDemo(); else store.logout().then(() => location.reload()) }, DEMO ? '離開' : '登出', 'btn danger');
     case 'saveBasic': {
