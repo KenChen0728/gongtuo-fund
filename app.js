@@ -2,7 +2,7 @@ import { createFirebaseStore, createDemoStore } from './data.js';
 import { colName } from './xlsx.js';
 import { sampleData } from './sample.js';
 
-const VERSION = '2026.11.23.7';
+const VERSION = '2026.11.25.1';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n || 0)).toLocaleString('en-US');
@@ -617,7 +617,7 @@ function fee() {
   }).join('')}</div>` : `<div class="empty">${ymNum(y, m) >= CYM ? '還沒有幼兒名單。按「＋ 新增幼兒」，輸入座號、姓名和生日。' : '這個月沒有月費紀錄。'}</div>`}
   ${xrSection(y, m, d)}
   <section><h2>備註<small>自動編號，列在月費表下方</small></h2>
-   <div class="list">${monthNotes(d).map((n, i) => { const k = S().kids.find(x => x.id === n.kid); return `<div class="row"><div class="main"><div class="title">${i + 1}. ${esc(k ? k.name : '')} ${esc(n.text)}</div></div><button type="button" class="edit" data-delnote="${esc(n.key)}">刪除</button></div>` }).join('') || '<div class="row"><div class="main meta">還沒有備註。</div></div>'}</div>
+   <div class="list">${monthNotes(d).map((n, i) => { const k = S().kids.find(x => x.id === n.kid); return `<div class="row"><div class="main"><div class="title">${i + 1}. ${esc(k ? k.name : '')} ${esc(n.text)}</div>${n.textPrinted != null && n.textPrinted !== n.text ? '<div class="meta"><span class="when-warn">收據印後改過備註，要重印這位的收據才會更新</span></div>' : ''}</div><div class="acts"><button type="button" class="edit" data-editnote="${esc(n.key)}">修改</button><button type="button" class="edit" data-delnote="${esc(n.key)}">刪除</button></div></div>` }).join('') || '<div class="row"><div class="main meta">還沒有備註。</div></div>'}</div>
   </section>
   ${rcptSkip(y).length ? `<p class="hint">${y} 年已標記協會借用：${rcptSkip(y).slice(-10).map(rcptNo).join('、')} 號，收據會跳過這些號碼。</p>` : ''}
   ${FP ? `<div style="height:190px"></div><div class="mergebar fpbar" id="fpBar"><div class="fprow"><div class="title" id="fpCount">已勾 ${FP.size} 張</div>
@@ -633,7 +633,9 @@ function printReceipts(y, m, kids, hasXr) {
     onPrint: () => {
       const d = monthDoc(y, m), fees = {}, rcptNos = {}; kids.forEach((k, i) => { fees[k.id] = (d.fees || {})[k.id] || {}; rcptNos[k.id] = nos[i] });
       const done = all.every(k => rcptNos[k.id] || (d.rcptNos || {})[k.id]);
-      store.set('months', ymKey(y, m), { y, m, fees, rcptNos, ...(done ? { rcptPrinted: true } : {}) }).catch(fail());
+      const noteMap = {}; Object.entries(d.noteMap || {}).forEach(([key, n]) => { if (n && n.textPrinted != null && rcptNos[n.kid]) noteMap[key] = { ...n, textPrinted: null } });
+      const notes = (d.notes || []).some(n => n && n.textPrinted != null && rcptNos[n.kid]) ? d.notes.map(n => n && rcptNos[n.kid] ? { ...n, textPrinted: null } : n) : null;
+      store.set('months', ymKey(y, m), { y, m, fees, rcptNos, ...(done ? { rcptPrinted: true } : {}), ...(Object.keys(noteMap).length ? { noteMap } : {}), ...(notes ? { notes } : {}) }).catch(fail());
       const top = Math.max(...nos); if (top + 1 > rcptNext(y)) store.setSettings({ receiptNextY: { [y]: top + 1 } }).catch(fail());
       if (kids.length < all.length) { FP = null; render() }
       toast(done ? '收據已印好。' : `已印 ${kids.length} 張，還有 ${all.filter(k => !rcptNos[k.id] && !(d.rcptNos || {})[k.id]).length} 張沒印。${hasXr ? '請款收據請在下方各自按「列印」。' : ''}`);
@@ -971,7 +973,7 @@ const HELP = [
   { id: 'print', t: '列印憑證', shot: 'print', steps: ['到「更多 → 憑證與列印」，按「列印憑證」。', '還沒印的會先勾好；要補印的，在「要印哪幾張」清單自己勾起來。', '先印第 1 批委辦費（一般紙），再印第 2 批其他經費來源（色紙），畫面會說要放幾張色紙。', '可以左右滑動或按「上一張／下一張」看每一張。電腦和平板的預覽上方有「－ ＋」可以放大縮小，按「符合視窗」回到原本大小（手機不顯示，避免誤觸）。', '這個月有在系統之外先做過憑證（手寫、Excel）：按「設定起始編號」填已經用到第幾號，系統從下一號接著編。頁面右上角的「下一張憑證」隨時顯示下一張的編號。', '印出後才發現發票金額錯了：按那張憑證的「修改」，選要改的發票，改好後憑證金額、結報清單和年度報表會一起更新，編號不變。紙本手改就好，不一定要重印。', '憑證做好後還要補備註（例如「11/20 園務會議，誤餐費」）：按那張憑證的「備註」修改，不用取消重做。已經印過的，改了要重印才會出現在紙上，也可以直接手寫。', '按「匯出業務費明細（Excel）」，下載照協會格式的全年業務費經費明細：每張憑證一列，金額放在對應的欄（委辦業務費各細項、兒童團體保險、營運收入支應、餐點費、提升托育品質、行管費），上面有預算和黃色的剩餘。營運收入支應、餐點費這幾欄的預算系統沒有，匯出後自己填。'] },
   { id: 'cash', t: '零用金結算', shot: 'cash', steps: ['每月兩次，到「更多 → 零用金結算」。', '清單列主任代墊的發票，還有生日禮金、考核獎金（主任代墊），照憑證編號排列，會計可以拿著憑證依序對帳。', '預設全部勾選；這次只要結算其中幾張，把其他的勾勾拿掉，沒勾的會留到下一次。', '按「結算到今天」。還有發票沒做憑證、憑證沒印的，會先提醒你。', '結算過的清單在下方「已結算」，可以再列印；結算後才發現問題，按「退回」，發票回到本期改好再重新結算。'] },
   { id: 'staff', t: '人事費', shot: 'staff', steps: ['薪資清冊做好後，到「更多 → 人事費」。', '每位員工填這個月的「薪資總額」，經費來源預設委辦費-人事費。', '委辦人事費不夠時，按那位員工的「拆單」：下面會多兩行，① 填委辦費-人事費付多少，② 營運收入支應-人事費自動算（總額減委辦）。按「儲存本月人事費」時，營運那份會另外建一張「薪資(2)」憑證。', '按「儲存本月人事費」。員工的生日月份在「設定 → 員工名單」填好，生日那個月儲存人事費時會自動建立生日禮金（預設 500 元），首頁也會提醒。', '生日禮金、考核獎金和外聘督導費的憑證要附領款收據：建立後人事費頁最上面會列出「還沒填寫列印」的，按綠色的「列印＋領據」先填領款收據（日期、姓名、服務單位等；地址和身分證字號可以留空給領款人手寫，填了也不會存起來），印成上面粘存單、下面領款收據。', '考核獎金：打開「考核獎金（一次填所有員工）」，選期別，每位員工選等第（優等 5,000、甲等 3,000 會自動帶入，可改），按「建立考核獎金憑證」。', '12 月會多一區「年度年終獎金」，每位員工直接填金額，按「建立年終獎金憑證」一次做好。代班薪資和其他月份的生日禮金、年終獎金在下方「其他人事支出」新增。', '按「匯出人事費明細（Excel）」，下載照協會格式的全年人事費經費明細：每月薪資、薪資(2)、生日禮金、考核獎金、年終獎金每張一列，上面有委辦人事費預算、已用幾 %、剩餘。系統啟用前已用、從 Excel 補登的月份各一列合計（灰底）。看哪一年就匯出哪一年，要匯出去年的，先把月份切到去年。'] },
-  { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。餐點費看孩子到當月 1 號滿幾個月：未滿 6 個月不收、未滿 1 歲 300 元、滿 1 歲 600 元。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。延托日期、退費原因（選填）會印在家長簽收單的金額後面。備註會列在月費表下方，也會印在那位孩子的收據摘要裡。月費、餐點費預設系統算，要改金額就在「修改」裡的「月費」「餐點費」欄填數字，清空就回到系統算的。', '按「家長簽收單」印這個月給家長簽名的學費明細，一頁 10 位（2 欄 × 5 列）。按「匯出月費 Excel」下載全年的月費表：1～12 月左右排開，每個月有編碼（收據號碼）、座號、姓名、月費、餐費、保險費、延托費、退費、總計、合計和備註，每記一個月就多一個月。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變；每年 1 月從 001 號重新開始。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。', '收據日期在頁面最上面，預設每月 15 號（遇週末順延），每個月可以自己改；預設幾號在「設定 → 收據」改，優化比、契約價金也可以設不同的預設日。', '每位孩子那一列都寫收據號碼和日期；只印一張就按那一列的「印這張」。', '要一次印好幾張，或改好幾張的日期：按「勾選多張（改日期／一起印）」，勾選後在畫面最下方按「列印勾選的」，或選日期按「套用日期」（只改勾選的，沒勾的維持原日期）。', '頁面下方「請款收據」：1、4、7、10 月會出現優化比（繳款人預設屏東縣政府；1 月是前一年第四期），1、2、7、10 月會出現契約價金（繳款人預設協會）。按「填寫」確認金額、貼上摘要，再按「列印」。其他要開的收據按「＋ 其他收據」。'] },
+  { id: 'fee', t: '月費與收據', shot: 'fee', steps: ['名單沿用上個月，月費和餐點費依上課天數和生日自動算。餐點費看孩子到當月 1 號滿幾個月：未滿 6 個月不收、未滿 1 歲 300 元、滿 1 歲 600 元。', '有延托、保險、退費的孩子，按「修改」填寫；退費填負數。延托日期、退費原因（選填）會印在家長簽收單的金額後面。備註會列在月費表下方，也會印在那位孩子的收據摘要裡；打錯了按那則備註的「修改」，收據已經印過的，改完要重印那一張。月費、餐點費預設系統算，要改金額就在「修改」裡的「月費」「餐點費」欄填數字，清空就回到系統算的。', '按「家長簽收單」印這個月給家長簽名的學費明細，一頁 10 位（2 欄 × 5 列）。按「匯出月費 Excel」下載全年的月費表：1～12 月左右排開，每個月有編碼（收據號碼）、座號、姓名、月費、餐費、保險費、延托費、退費、總計、合計和備註，每記一個月就多一個月。', '按「列印收據」，每位孩子一頁三聯。收據號碼在列印時確定，印過的不會再變；每年 1 月從 001 號重新開始。', '協會借用的收據號碼，按「協會借用號碼」標記，之後會跳過。', '收據日期在頁面最上面，預設每月 15 號（遇週末順延），每個月可以自己改；預設幾號在「設定 → 收據」改，優化比、契約價金也可以設不同的預設日。', '每位孩子那一列都寫收據號碼和日期；只印一張就按那一列的「印這張」。', '要一次印好幾張，或改好幾張的日期：按「勾選多張（改日期／一起印）」，勾選後在畫面最下方按「列印勾選的」，或選日期按「套用日期」（只改勾選的，沒勾的維持原日期）。', '頁面下方「請款收據」：1、4、7、10 月會出現優化比（繳款人預設屏東縣政府；1 月是前一年第四期），1、2、7、10 月會出現契約價金（繳款人預設協會）。按「填寫」確認金額、貼上摘要，再按「列印」。其他要開的收據按「＋ 其他收據」。'] },
   { id: 'report', t: '報表', shot: 'report', steps: ['「年度經費報表」照每月報表的格式，自動算每月收入、支出、損益，和委辦費、行管費用了幾 %。', '優化比、提升托育品質、縣府補助款到帳時，按「＋ 新增撥款收入」；補助款要選期別（第一期、第二期⋯），每一期各一列。', '按「列印（A4 橫式）」印一頁；按「匯出 Excel」下載和原本格式一樣的 Excel（標楷體、顏色、公式），有三個分頁：每月報表、人事費明細、業務費明細。', '委辦業務費有項目快用完或超支時，報表頁會列出「不夠用的項目」，按「補足」選要從哪一項轉出、金額，業務費總額不變；挪用紀錄可以還原。', '系統啟用前的月份，按「從 Excel 補登」選原本的經費明細檔，核對數字後按「補登」。補登之後才在系統新增的憑證、撥款收入會自動加上去；Excel 那個月沒有月費的，用系統算的月費。Excel 裡系統沒有固定位置的列（例如開辦費）可以勾選匯入成「其他經費來源」，列在報表最下方，連年度預算一起帶入；已經補登過的話，選「只加入勾選的其他經費來源」，原本的數字不會動。要交縣府時按「產出核銷報表」。'] },
   { id: 'trash', t: '刪錯了怎麼辦', shot: 'trash', steps: ['刪除的發票、取消的憑證會在「更多 → 垃圾桶」放 30 天。', '按「救回」就回到原本的地方，任何一台裝置都能救。', '剛刪掉時，畫面下方的提示也有「復原」可以按。', '憑證做錯想沿用同一個編號：先取消憑證，再到垃圾桶按「永久刪除」，下一張新做的憑證就會用這個編號。'] },
   { id: 'backup', t: '備份與還原', shot: 'backup', steps: ['建議每個月到「更多 → 設定 → 備份」按「下載備份」，存到電腦。', '萬一資料被改錯，按「從備份還原」，選那個備份檔。', '還原前會先自動下載一份目前的資料，還原錯了還能再還原回來。', '備份之後才新增的資料不會被刪掉。', '管理者每月 25 號起會看到提醒，到「設定 → 備份」按「一次下載四間」，會下載四間的每月報表（Excel）和備份（還原用）兩個檔案。還原時選這個四間的備份檔也可以，會自動取出目前這間。', '協會出納要四間的月費：管理者到「設定 → 備份」按「四間的月費（Excel）」，或在月費頁按「管理者：四間月費 Excel」（匯出月費頁正在看的那一年）。一個檔案、一間一張工作表，1～12 月左右排開。'] },
@@ -2185,6 +2187,21 @@ document.addEventListener('click', e => {
     return;
   }
   if (t.dataset.printset) { const s = S().settlements.find(x => x.id === t.dataset.printset); return openPreview({ title: `代墊金結報清單（${s.m} 月第 ${s.n} 次）`, pages: [cashSheet(s.rows, `${s.m} 月第 ${s.n} 次結算（${s.date}）`, s.y, s.m)] }) }
+  if (t.dataset.editnote) {          // 修改月費備註：只改文字，順序和編號不變
+    const { y, m } = SEL_M.fee, key = t.dataset.editnote, d = monthDoc(y, m), n = monthNotes(d).find(x => x.key === key); if (!n) return;
+    const k = S().kids.find(x => x.id === n.kid), printed = !!(d.rcptNos || {})[n.kid];
+    return ask(`修改備註${k ? `（${k.name}）` : ''}`, `<label>備註<textarea id="noteEditIn">${esc(n.text || '')}</textarea></label>${printed ? '<p class="hint" style="font-size:15px">這位孩子的收據已經印過：改好後要重印這張收據，紙上才會換成新的備註。</p>' : ''}`, () => {
+      const text = $('#noteEditIn').value.trim();
+      if (!text) { toast('備註不能是空白。不要這則備註請按「刪除」。'); return false }
+      if (text === (n.text || '')) return;
+      const keep = printed && n.textPrinted == null ? { textPrinted: n.text || '' } : {};
+      if (key.startsWith('old')) {      // 舊資料的備註陣列
+        const notes = [...(d.notes || [])], i = +key.slice(3); notes[i] = { ...notes[i], text, ...keep };
+        store.set('months', ymKey(y, m), { y, m, notes }).catch(fail());
+      } else store.set('months', ymKey(y, m), { y, m, noteMap: { [key]: { ...(d.noteMap || {})[key], text, ...keep } } }).catch(fail());
+      toast(printed ? '備註已修改。這位的收據已經印過，要重印才會更新。' : '備註已修改。');
+    }, '儲存');
+  }
   if (t.dataset.delnote) {
     const { y, m } = SEL_M.fee, key = t.dataset.delnote, d = monthDoc(y, m);
     if (key.startsWith('old')) {      // 舊資料的備註陣列
